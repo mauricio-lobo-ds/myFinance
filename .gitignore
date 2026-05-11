@@ -1,3 +1,27 @@
 .env
 google/*.json
+venv/
 
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.log
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+*.bak
+*.tmp
+*.egg-info/
+dist/
+build/
+*.egg
+*.tar.gz
+*.zip
+coverage/
+htmlcov/
+.coverage
+.coverage.*
+.pytest_cache/      
