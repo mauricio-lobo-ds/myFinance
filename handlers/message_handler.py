@@ -3,44 +3,58 @@ from datetime import datetime, timedelta
 import telebot
 from handlers.auth import is_authorized
 from ai.llm_client import ask_llm
-from db.sheets import save_to_db, get_comprovantes, get_gastos, get_gastos_todos
+from db.sheets import save_to_db, get_comprovantes, get_comprovantes_todos, get_gastos, get_gastos_todos
 from config import USER_NAMES, AUTHORIZED_USER_IDS
 
 # (chat_id, bot_message_id) -> {"periodo": str|None, "who": str, "target_uid": int, "requesting_user_id": int}
 _gastos_state: dict[tuple[int, int], dict] = {}
+_comp_state: dict[tuple[int, int], dict] = {}
+
+
+_QUICK_ACTIONS = {"💰 Gastos", "📎 Comprovantes", "❓ Ajuda"}
+
+
+def _reply_keyboard() -> telebot.types.ReplyKeyboardMarkup:
+    kb = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
+    kb.row(
+        telebot.types.KeyboardButton("💰 Gastos"),
+        telebot.types.KeyboardButton("📎 Comprovantes"),
+        telebot.types.KeyboardButton("❓ Ajuda"),
+    )
+    return kb
 
 
 def _nome_usuario(uid: int, username: str = "") -> str:
     return USER_NAMES.get(uid) or (f"@{username}" if username else f"ID {uid}")
 
 
-def _keyboard_who() -> telebot.types.InlineKeyboardMarkup:
+def _keyboard_who(prefix: str = "gastos") -> telebot.types.InlineKeyboardMarkup:
     kb = telebot.types.InlineKeyboardMarkup(row_width=2)
     kb.add(
-        telebot.types.InlineKeyboardButton("👤 Meus gastos", callback_data="gastos:who:meu"),
-        telebot.types.InlineKeyboardButton("👥 Todos", callback_data="gastos:who:todos"),
+        telebot.types.InlineKeyboardButton("👤 Meus", callback_data=f"{prefix}:who:meu"),
+        telebot.types.InlineKeyboardButton("👥 Todos", callback_data=f"{prefix}:who:todos"),
     )
-    kb.add(telebot.types.InlineKeyboardButton("🔍 Por pessoa", callback_data="gastos:who:pessoa"))
+    kb.add(telebot.types.InlineKeyboardButton("🔍 Por pessoa", callback_data=f"{prefix}:who:pessoa"))
     return kb
 
 
-def _keyboard_period() -> telebot.types.InlineKeyboardMarkup:
+def _keyboard_period(prefix: str = "gastos") -> telebot.types.InlineKeyboardMarkup:
     now = datetime.now()
     mes_atual = now.strftime("%Y-%m")
     mes_anterior = (now.replace(day=1) - timedelta(days=1)).strftime("%Y-%m")
     ano_atual = now.strftime("%Y")
     kb = telebot.types.InlineKeyboardMarkup()
-    kb.add(telebot.types.InlineKeyboardButton(f"📅 Mês atual ({mes_atual})", callback_data=f"gastos:period:{mes_atual}"))
-    kb.add(telebot.types.InlineKeyboardButton(f"⬅️ Mês passado ({mes_anterior})", callback_data=f"gastos:period:{mes_anterior}"))
-    kb.add(telebot.types.InlineKeyboardButton(f"📆 Este ano ({ano_atual})", callback_data=f"gastos:period:{ano_atual}"))
+    kb.add(telebot.types.InlineKeyboardButton(f"📅 Mês atual ({mes_atual})", callback_data=f"{prefix}:period:{mes_atual}"))
+    kb.add(telebot.types.InlineKeyboardButton(f"⬅️ Mês passado ({mes_anterior})", callback_data=f"{prefix}:period:{mes_anterior}"))
+    kb.add(telebot.types.InlineKeyboardButton(f"📆 Este ano ({ano_atual})", callback_data=f"{prefix}:period:{ano_atual}"))
     return kb
 
 
-def _keyboard_pessoas() -> telebot.types.InlineKeyboardMarkup:
+def _keyboard_pessoas(prefix: str = "gastos") -> telebot.types.InlineKeyboardMarkup:
     kb = telebot.types.InlineKeyboardMarkup()
     for uid in AUTHORIZED_USER_IDS:
         nome = USER_NAMES.get(uid, f"Usuário {uid}")
-        kb.add(telebot.types.InlineKeyboardButton(nome, callback_data=f"gastos:uid:{uid}"))
+        kb.add(telebot.types.InlineKeyboardButton(nome, callback_data=f"{prefix}:uid:{uid}"))
     return kb
 
 
@@ -80,6 +94,16 @@ def _resolve_gastos(who: str, requesting_uid: int, target_uid: int | None, perio
         return get_gastos(target_uid, periodo), f"Gastos de {nome} — {periodo}", False
     nome = _nome_usuario(requesting_uid)
     return get_gastos(requesting_uid, periodo), f"Gastos de {nome} — {periodo}", False
+
+
+def _resolve_comprovantes(who: str, requesting_uid: int, target_uid: int | None, mes: str) -> tuple[list[dict], str]:
+    if who == "todos":
+        return get_comprovantes_todos(mes), f"Todos os comprovantes — {mes}"
+    if who == "uid" and target_uid is not None:
+        nome = _nome_usuario(target_uid)
+        return get_comprovantes(target_uid, mes), f"Comprovantes de {nome} — {mes}"
+    nome = _nome_usuario(requesting_uid)
+    return get_comprovantes(requesting_uid, mes), f"Comprovantes de {nome} — {mes}"
 
 
 def _keyboard_lancamentos(who: str, requesting_uid: int, target_uid: int | None, periodo: str) -> telebot.types.InlineKeyboardMarkup:
@@ -134,11 +158,32 @@ def register_handlers(bot: telebot.TeleBot) -> None:
 
     def _start_gastos_flow(message: telebot.types.Message, user_id: int, periodo: str | None) -> None:
         text = f"📊 Gastos de {periodo} — quem você quer ver?" if periodo else "📊 Gastos — o que você quer ver?"
-        sent = bot.reply_to(message, text, reply_markup=_keyboard_who())
+        sent = bot.reply_to(message, text, reply_markup=_keyboard_who("gastos"))
         _gastos_state[(message.chat.id, sent.message_id)] = {
             "periodo": periodo,
             "requesting_user_id": user_id,
         }
+
+    def _start_comp_flow(message: telebot.types.Message, user_id: int, mes: str | None) -> None:
+        text = f"📎 Comprovantes de {mes} — quem você quer ver?" if mes else "📎 Comprovantes — o que você quer ver?"
+        sent = bot.reply_to(message, text, reply_markup=_keyboard_who("comp"))
+        _comp_state[(message.chat.id, sent.message_id)] = {
+            "periodo": mes,
+            "requesting_user_id": user_id,
+        }
+
+    @bot.message_handler(commands=["start"])
+    def handle_start(message: telebot.types.Message) -> None:
+        if not is_authorized(message.from_user.id):
+            bot.reply_to(message, "❌ Acesso não autorizado.")
+            return
+        nome = message.from_user.first_name or "você"
+        bot.reply_to(
+            message,
+            f"👋 Olá, {nome}\\! Use os botões abaixo ou descreva um gasto para registrar\\.",
+            parse_mode="MarkdownV2",
+            reply_markup=_reply_keyboard(),
+        )
 
     @bot.message_handler(commands=["help", "ajuda"])
     def handle_help(message: telebot.types.Message) -> None:
@@ -165,7 +210,7 @@ def register_handlers(bot: telebot.TeleBot) -> None:
             "*Ajuda*\n"
             "/help — exibe esta mensagem"
         )
-        bot.reply_to(message, texto, parse_mode="MarkdownV2")
+        bot.reply_to(message, texto, parse_mode="MarkdownV2", reply_markup=_reply_keyboard())
 
     @bot.message_handler(commands=["gastos"])
     def handle_gastos(message: telebot.types.Message) -> None:
@@ -237,6 +282,67 @@ def register_handlers(bot: telebot.TeleBot) -> None:
 
         bot.answer_callback_query(call.id)
 
+    @bot.callback_query_handler(func=lambda c: c.data.startswith("comp:"))
+    def handle_comp_callback(call: telebot.types.CallbackQuery) -> None:
+        user_id = call.from_user.id
+        chat_id = call.message.chat.id
+        msg_id = call.message.message_id
+        state_key = (chat_id, msg_id)
+
+        if not is_authorized(user_id):
+            bot.answer_callback_query(call.id, "❌ Acesso não autorizado.")
+            return
+
+        state = _comp_state.get(state_key, {})
+        requesting_uid = state.get("requesting_user_id", user_id)
+        data = call.data
+
+        def _send_comp_result(who: str, req_uid: int, tgt_uid: int | None, mes: str) -> None:
+            rows, titulo = _resolve_comprovantes(who, req_uid, tgt_uid, mes)
+            if not rows:
+                bot.edit_message_text(f"ℹ️ Nenhum comprovante encontrado para {mes}.", chat_id, msg_id)
+                return
+            bot.edit_message_text(f"📎 {titulo}\n{len(rows)} comprovante(s) encontrado(s):", chat_id, msg_id)
+            for r in rows[-5:]:
+                caption = (
+                    f"💰 R$ {float(r.get('valor', 0)):.2f} — {r.get('descricao', '')}\n"
+                    f"📂 {r.get('categoria', '')} | 📅 {r.get('data_gasto', '')}"
+                )
+                bot.send_photo(chat_id, r["telegram_file_id"], caption=caption)
+
+        if data.startswith("comp:who:"):
+            who = data[len("comp:who:"):]
+            if who == "pessoa":
+                _comp_state[state_key] = {**state, "step": "pessoa"}
+                bot.edit_message_text("🔍 Selecione a pessoa:", chat_id, msg_id, reply_markup=_keyboard_pessoas("comp"))
+            else:
+                mes = state.get("periodo")
+                _comp_state[state_key] = {**state, "who": who}
+                if mes:
+                    _comp_state.pop(state_key, None)
+                    _send_comp_result(who, requesting_uid, None, mes)
+                else:
+                    bot.edit_message_text("📅 Qual período?", chat_id, msg_id, reply_markup=_keyboard_period("comp"))
+
+        elif data.startswith("comp:uid:"):
+            target_uid = int(data[len("comp:uid:"):])
+            mes = state.get("periodo")
+            _comp_state[state_key] = {**state, "who": "uid", "target_uid": target_uid}
+            if mes:
+                _comp_state.pop(state_key, None)
+                _send_comp_result("uid", requesting_uid, target_uid, mes)
+            else:
+                bot.edit_message_text("📅 Qual período?", chat_id, msg_id, reply_markup=_keyboard_period("comp"))
+
+        elif data.startswith("comp:period:"):
+            mes = data[len("comp:period:"):]
+            who = state.get("who", "meu")
+            target_uid = state.get("target_uid")
+            _comp_state.pop(state_key, None)
+            _send_comp_result(who, requesting_uid, target_uid, mes)
+
+        bot.answer_callback_query(call.id)
+
     @bot.callback_query_handler(func=lambda c: c.data.startswith("lanca:"))
     def handle_lancamentos_callback(call: telebot.types.CallbackQuery) -> None:
         if not is_authorized(call.from_user.id):
@@ -264,17 +370,7 @@ def register_handlers(bot: telebot.TeleBot) -> None:
             return
         args = message.text.split(maxsplit=1)
         mes = args[1].strip() if len(args) > 1 else None
-        resultados = get_comprovantes(user_id, mes)
-        if not resultados:
-            dica = f" para {mes}" if mes else ""
-            bot.reply_to(message, f"ℹ️ Nenhum comprovante encontrado{dica}.")
-            return
-        for r in resultados[-5:]:
-            caption = (
-                f"💰 R$ {float(r.get('valor', 0)):.2f} — {r.get('descricao', '')}\n"
-                f"📂 {r.get('categoria', '')} | 📅 {r.get('data_gasto', '')}"
-            )
-            bot.send_photo(message.chat.id, r["telegram_file_id"], caption=caption)
+        _start_comp_flow(message, user_id, mes)
 
     @bot.message_handler(content_types=["photo"])
     def handle_photo(message: telebot.types.Message) -> None:
@@ -311,6 +407,17 @@ def register_handlers(bot: telebot.TeleBot) -> None:
         if not is_authorized(user_id):
             bot.reply_to(message, "❌ Acesso não autorizado.")
             return
+
+        if message.text == "💰 Gastos":
+            _start_gastos_flow(message, user_id, None)
+            return
+        if message.text == "📎 Comprovantes":
+            _start_comp_flow(message, user_id, None)
+            return
+        if message.text == "❓ Ajuda":
+            handle_help(message)
+            return
+
         today = datetime.now().strftime("%Y-%m-%d")
         resultado = _classify(message.text, today)
         if resultado is None:
@@ -338,17 +445,7 @@ def register_handlers(bot: telebot.TeleBot) -> None:
             _start_gastos_flow(message, user_id, resultado.get("periodo"))
 
         elif intent == "comprovantes":
-            mes = resultado.get("mes", today[:7])
-            resultados = get_comprovantes(user_id, mes)
-            if not resultados:
-                bot.reply_to(message, f"ℹ️ Nenhum comprovante encontrado para {mes}.")
-                return
-            for r in resultados[-5:]:
-                caption = (
-                    f"💰 R$ {r['valor']:.2f} — {r['descricao']}\n"
-                    f"📂 {r['categoria']} | 📅 {r['data_gasto']}"
-                )
-                bot.send_photo(message.chat.id, r["telegram_file_id"], caption=caption)
+            _start_comp_flow(message, user_id, resultado.get("mes"))
 
         elif intent == "ajuda":
             handle_help(message)

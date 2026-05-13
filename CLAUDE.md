@@ -20,22 +20,25 @@ Personal finance Telegram bot. The user sends expenses or queries in natural lan
 ```
 TELEGRAM_TOKEN_BOTFATHER=        # Token do @BotFather
 AUTHORIZED_USER_IDS=111,222      # IDs separados por vírgula (obter via @userinfobot)
+USER_NAMES=111:Mauricio,222:Ana  # Nomes amigáveis por ID (opcional)
 LLM_API_KEY=                     # OpenRouter API key
 GOOGLE_SHEET_NAME=MensagensBot   # Nome exato da planilha (não URL)
+GOOGLE_CREDENTIALS_JSON=         # Conteúdo do JSON da Service Account (para deploy)
 ```
 
 ## Project Structure
 
 ```
 main.py               # Bot entry point, polling loop
-config.py             # Load .env vars, parse AUTHORIZED_USER_IDS
+config.py             # Load .env vars, parse AUTHORIZED_USER_IDS, USER_NAMES
 handlers/
-  message_handler.py  # Handlers: text, photo, /gastos, /comprovante, /help
+  message_handler.py  # All handlers: text, photo, commands, inline + reply keyboards
   auth.py             # is_authorized(user_id)
 ai/
   llm_client.py       # OpenRouter API call — returns intent-classified JSON
 db/
-  sheets.py           # save_to_db(), get_gastos(), get_comprovantes() via gspread
+  sheets.py           # save_to_db(), get_gastos(), get_gastos_todos(),
+                      # get_comprovantes(), get_comprovantes_todos() via gspread
 google/               # Google Service Account credentials (never commit — in .gitignore)
   don-meu-agente-6886231ffdfe.json
 tests/
@@ -49,17 +52,37 @@ requirements.txt
 
 ## Core Message Flow
 
-All text messages go through `ask_llm()` which returns a JSON with an `intent` field. `handle_message()` routes based on intent:
+Quick-action buttons ("💰 Gastos", "📎 Comprovantes", "❓ Ajuda") are intercepted in `handle_message()` before the LLM call — no tokens consumed. All other text goes through `ask_llm()`:
 
 | Intent | Trigger examples | Action |
 |---|---|---|
 | `registrar` | "Almoço 35 reais", "Netflix 45,90" | Saves expense to Sheets |
-| `gastos` | "Quanto gastei esse mês?", "Resumo de abril" | Returns spending summary |
-| `comprovantes` | "Mostra meus comprovantes de maio" | Sends receipt photos |
+| `gastos` | "Quanto gastei esse mês?", "Resumo de abril" | Interactive keyboard flow |
+| `comprovantes` | "Mostra meus comprovantes de maio" | Interactive keyboard flow |
 | `ajuda` | "O que você faz?", "ajuda" | Shows /help |
 | `invalido` | Greetings, random text | Fallback message |
 
 Photos with captions are handled separately by `handle_photo()` — caption is the expense description, photo is saved as `telegram_file_id` in column I.
+
+## Interactive Keyboard Flow (gastos and comprovantes)
+
+Both `/gastos` and `/comprovante` use a 2-step inline keyboard flow:
+
+1. **Who**: [👤 Meus] [👥 Todos] [🔍 Por pessoa]
+2. **Period**: [📅 Mês atual] [⬅️ Mês passado] [📆 Este ano]
+
+If the LLM already extracted a period (natural language) or the user passed one as argument (`/gastos 2026-05`), step 2 is skipped.
+
+State is stored in `_gastos_state` / `_comp_state` dicts keyed by `(chat_id, message_id)`. Callback prefixes: `gastos:`, `comp:`, `lanca:`.
+
+After the gastos summary, a "📋 Ver lançamentos" inline button shows individual entries (max 30 most recent).
+
+## Reply Keyboard (persistent bottom buttons)
+
+Shown on `/start` and `/help`. Three buttons:
+- **💰 Gastos** → starts gastos interactive flow
+- **📎 Comprovantes** → starts comprovantes interactive flow
+- **❓ Ajuda** → shows help message
 
 ## LLM Response Format
 
@@ -85,11 +108,12 @@ Headers are auto-created at startup by `_ensure_headers()` in `sheets.py`.
 - The target spreadsheet must be shared with the Service Account email above
 - Note: Service Accounts have no Drive storage quota — file uploads go via Telegram file_id only
 
-## Slash Commands (also work as natural language)
+## Slash Commands
 
-- `/help` or `/ajuda` — list commands
-- `/gastos [YYYY-MM|YYYY]` — expense summary for period (default: current month)
-- `/comprovante [YYYY-MM]` — last 5 receipts for period (default: current month)
+- `/start` — welcome message + shows reply keyboard
+- `/help` or `/ajuda` — list commands + shows reply keyboard
+- `/gastos [YYYY-MM|YYYY]` — interactive expense summary
+- `/comprovante [YYYY-MM]` — interactive receipt viewer
 
 ## Receipt Storage
 
@@ -121,7 +145,7 @@ Run: `python main.py`
 
 ## Authorization Design
 
-`AUTHORIZED_USER_IDS` is parsed at startup as a list of ints. For dynamic authorization without restarts, store IDs in the database instead.
+`AUTHORIZED_USER_IDS` is parsed at startup as a list of ints. `USER_NAMES` maps IDs to friendly display names used in summaries and keyboard labels. For dynamic authorization without restarts, store IDs in the database instead.
 
 ## Expense Categories
 

@@ -64,6 +64,15 @@ def get_gastos_todos(periodo: str = None) -> list[dict]:
     ]
 
 
+def get_comprovantes_todos(mes: str = None) -> list[dict]:
+    rows = _sheet.get_all_records()
+    return [
+        r for r in rows
+        if r.get("telegram_file_id")
+        and (mes is None or str(r.get("data_gasto", "")).startswith(mes))
+    ]
+
+
 def get_comprovantes(user_id: int, mes: str = None) -> list[dict]:
     rows = _sheet.get_all_records()
     results = [
