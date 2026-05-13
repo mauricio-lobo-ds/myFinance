@@ -31,7 +31,7 @@ Se não mencionar mês, use o mês atual.
 5. Inválido — mensagem sem contexto financeiro claro:
 {{"intent": "invalido"}}
 
-Categorias válidas: Alimentação, Transporte, Moradia, Saúde, Lazer, Educação, Streaming, Roupas, Outros
+Categorias válidas: Mercado, Alimentação, Transporte, Moradia (inclui água, luz, internet, aluguel, condominio, etc.), Saúde (planos de saude, medicos, consultas, remedios, etc.), Lazer, Educação, Assinaturas e Streamings (Telefone, Netflix, Spotify, Inteligencia Artificial, Storage em Nuvem etc.), Compras (roupas, objetos diversos para casa como microondas maquina de lavar e outros que nao sejam despesas regulares da moradia, camera fotografica, presentes, etc.), Besteiras (doces, superfluos, etc), Outros.
 Regras: valor sempre decimal positivo sem símbolo de moeda. data_gasto usa hoje se não mencionada."""
 
 

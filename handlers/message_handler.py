@@ -165,9 +165,9 @@ def _preview_text(expense: dict, com_comprovante: bool = False) -> str:
 def _keyboard_confirm() -> telebot.types.InlineKeyboardMarkup:
     kb = telebot.types.InlineKeyboardMarkup(row_width=3)
     kb.add(
-        telebot.types.InlineKeyboardButton("✅ Confirmar", callback_data="pend:confirm"),
-        telebot.types.InlineKeyboardButton("❌ Cancelar", callback_data="pend:cancel"),
-        telebot.types.InlineKeyboardButton("✏️ Editar", callback_data="pend:edit"),
+        telebot.types.InlineKeyboardButton("✅", callback_data="pend:confirm"),
+        telebot.types.InlineKeyboardButton("❌", callback_data="pend:cancel"),
+        telebot.types.InlineKeyboardButton("✏️", callback_data="pend:edit"),
     )
     return kb
 
