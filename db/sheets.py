@@ -33,13 +33,34 @@ def _ensure_headers() -> None:
 _ensure_headers()
 
 
+def _safe_float(v) -> float:
+    if isinstance(v, (int, float)):
+        return float(v)
+    s = str(v).strip()
+    if not s:
+        return 0.0
+    # Formato BR (1.234,56): remove pontos de milhar, troca vírgula decimal por ponto
+    if "," in s:
+        s = s.replace(".", "").replace(",", ".")
+    try:
+        return float(s)
+    except ValueError:
+        return 0.0
+
+
+def _normalize(rows: list[dict]) -> list[dict]:
+    for r in rows:
+        r["valor"] = _safe_float(r.get("valor", 0))
+    return rows
+
+
 def save_to_db(data: dict) -> None:
     _sheet.append_row([
         data["timestamp"],
         data["user_id"],
         data["username"],
         data["mensagem_original"],
-        data["valor"],
+        _safe_float(data.get("valor", 0)),
         data["categoria"],
         data["descricao"],
         data["data_gasto"],
@@ -48,7 +69,7 @@ def save_to_db(data: dict) -> None:
 
 
 def get_gastos(user_id: int, periodo: str = None) -> list[dict]:
-    rows = _sheet.get_all_records()
+    rows = _normalize(_sheet.get_all_records())
     return [
         r for r in rows
         if str(r.get("user_id")) == str(user_id)
@@ -57,7 +78,7 @@ def get_gastos(user_id: int, periodo: str = None) -> list[dict]:
 
 
 def get_gastos_todos(periodo: str = None) -> list[dict]:
-    rows = _sheet.get_all_records()
+    rows = _normalize(_sheet.get_all_records())
     return [
         r for r in rows
         if periodo is None or str(r.get("data_gasto", "")).startswith(periodo)
@@ -65,7 +86,7 @@ def get_gastos_todos(periodo: str = None) -> list[dict]:
 
 
 def get_comprovantes_todos(mes: str = None) -> list[dict]:
-    rows = _sheet.get_all_records()
+    rows = _normalize(_sheet.get_all_records())
     return [
         r for r in rows
         if r.get("telegram_file_id")
@@ -74,11 +95,10 @@ def get_comprovantes_todos(mes: str = None) -> list[dict]:
 
 
 def get_comprovantes(user_id: int, mes: str = None) -> list[dict]:
-    rows = _sheet.get_all_records()
-    results = [
+    rows = _normalize(_sheet.get_all_records())
+    return [
         r for r in rows
         if str(r.get("user_id")) == str(user_id)
         and r.get("telegram_file_id")
         and (mes is None or str(r.get("data_gasto", "")).startswith(mes))
     ]
-    return results

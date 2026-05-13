@@ -455,10 +455,14 @@ def register_handlers(bot: telebot.TeleBot) -> None:
                 f"📂 {expense.get('categoria', 'Outros')} | 📅 {expense.get('data_gasto', '')}",
                 chat_id, msg_id,
             )
+            sent = bot.send_message(chat_id, "💬 Mais alguma coisa?", reply_markup=_reply_keyboard())
+            _track_msg(chat_id, sent.message_id)
 
         elif data == "pend:cancel":
             _pending_expense.pop(state_key, None)
             bot.edit_message_text("❌ Registro cancelado.", chat_id, msg_id)
+            sent = bot.send_message(chat_id, "💬 Pode mandar outro gasto.", reply_markup=_reply_keyboard())
+            _track_msg(chat_id, sent.message_id)
 
         elif data == "pend:edit":
             bot.edit_message_text(
@@ -520,13 +524,13 @@ def register_handlers(bot: telebot.TeleBot) -> None:
             return
         caption = message.caption
         if not caption:
-            sent = bot.reply_to(message, "📎 Mande a foto com uma legenda descrevendo o gasto. Ex: 'Condomínio 850'")
+            sent = bot.reply_to(message, "📎 Mande a foto com uma legenda descrevendo o gasto. Ex: 'Condomínio 850'", reply_markup=_reply_keyboard())
             _track_msg(message.chat.id, sent.message_id)
             return
         today = datetime.now().strftime("%Y-%m-%d")
         classified = _classify(caption, today)
         if classified is None or classified.get("intent") != "registrar" or not classified.get("valido", False):
-            sent = bot.reply_to(message, "❌ Não entendi o gasto na legenda. Tente: 'Condomínio 850 reais'.")
+            sent = bot.reply_to(message, "❌ Não entendi o gasto na legenda. Tente: 'Condomínio 850 reais'.", reply_markup=_reply_keyboard())
             _track_msg(message.chat.id, sent.message_id)
             return
         file_id = message.photo[-1].file_id
@@ -606,14 +610,14 @@ def register_handlers(bot: telebot.TeleBot) -> None:
         today = datetime.now().strftime("%Y-%m-%d")
         resultado = _classify(message.text, today)
         if resultado is None:
-            sent = bot.reply_to(message, "❌ Não consegui entender. Tente novamente ou use /help.")
+            sent = bot.reply_to(message, "❌ Não consegui entender. Tente novamente ou use /help.", reply_markup=_reply_keyboard())
             _track_msg(chat_id, sent.message_id)
             return
         intent = resultado.get("intent")
 
         if intent == "registrar":
             if not resultado.get("valido", False):
-                sent = bot.reply_to(message, "ℹ️ Manda um gasto pra eu registrar! Ex: 'Almoço 35 reais' ou 'Netflix 45,90'.")
+                sent = bot.reply_to(message, "ℹ️ Manda um gasto pra eu registrar! Ex: 'Almoço 35 reais' ou 'Netflix 45,90'.", reply_markup=_reply_keyboard())
                 _track_msg(chat_id, sent.message_id)
                 return
             expense = {
@@ -642,5 +646,5 @@ def register_handlers(bot: telebot.TeleBot) -> None:
             handle_help(message)
 
         else:
-            sent = bot.reply_to(message, "ℹ️ Não entendi. Use /help para ver o que posso fazer.")
+            sent = bot.reply_to(message, "ℹ️ Não entendi. Use /help para ver o que posso fazer.", reply_markup=_reply_keyboard())
             _track_msg(chat_id, sent.message_id)
