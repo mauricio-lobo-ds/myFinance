@@ -9,17 +9,29 @@ from config import USER_NAMES, AUTHORIZED_USER_IDS
 # (chat_id, bot_message_id) -> {"periodo": str|None, "who": str, "target_uid": int, "requesting_user_id": int}
 _gastos_state: dict[tuple[int, int], dict] = {}
 _comp_state: dict[tuple[int, int], dict] = {}
+_pending_expense: dict[tuple[int, int], dict] = {}
+_editing_state: dict[tuple[int, int], dict] = {}
+_chat_bot_msgs: dict[int, list[int]] = {}
 
 
-_QUICK_ACTIONS = {"💰 Gastos", "📎 Comprovantes", "❓ Ajuda"}
+_QUICK_ACTIONS = {"💸", "📎", "❓", "🧹"}
+_CATEGORIES = ["Alimentação", "Transporte", "Moradia", "Saúde", "Lazer", "Educação", "Streaming", "Roupas", "Outros"]
+
+
+def _track_msg(chat_id: int, message_id: int) -> None:
+    msgs = _chat_bot_msgs.setdefault(chat_id, [])
+    msgs.append(message_id)
+    if len(msgs) > 100:
+        msgs.pop(0)
 
 
 def _reply_keyboard() -> telebot.types.ReplyKeyboardMarkup:
     kb = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
     kb.row(
-        telebot.types.KeyboardButton("💰 Gastos"),
-        telebot.types.KeyboardButton("📎 Comprovantes"),
-        telebot.types.KeyboardButton("❓ Ajuda"),
+        telebot.types.KeyboardButton("💸"),
+        telebot.types.KeyboardButton("📎"),
+        telebot.types.KeyboardButton("❓"),
+        telebot.types.KeyboardButton("🧹"),
     )
     return kb
 
@@ -140,6 +152,48 @@ def _build_lancamentos_text(titulo: str, rows: list[dict], show_pessoa: bool = F
     return "\n".join(parts)
 
 
+def _preview_text(expense: dict, com_comprovante: bool = False) -> str:
+    comprovante_line = "\n📷 Com comprovante" if com_comprovante else ""
+    return (
+        f"📋 Confirma o registro?\n\n"
+        f"💰 R$ {expense.get('valor', 0):.2f} — {expense.get('descricao', '')}\n"
+        f"📂 {expense.get('categoria', 'Outros')} | 📅 {expense.get('data_gasto', '')}"
+        f"{comprovante_line}"
+    )
+
+
+def _keyboard_confirm() -> telebot.types.InlineKeyboardMarkup:
+    kb = telebot.types.InlineKeyboardMarkup(row_width=3)
+    kb.add(
+        telebot.types.InlineKeyboardButton("✅ Confirmar", callback_data="pend:confirm"),
+        telebot.types.InlineKeyboardButton("❌ Cancelar", callback_data="pend:cancel"),
+        telebot.types.InlineKeyboardButton("✏️ Editar", callback_data="pend:edit"),
+    )
+    return kb
+
+
+def _keyboard_edit_fields() -> telebot.types.InlineKeyboardMarkup:
+    kb = telebot.types.InlineKeyboardMarkup(row_width=2)
+    kb.add(
+        telebot.types.InlineKeyboardButton("💰 Valor", callback_data="pend:field:valor"),
+        telebot.types.InlineKeyboardButton("📂 Categoria", callback_data="pend:field:categoria"),
+    )
+    kb.add(
+        telebot.types.InlineKeyboardButton("📝 Descrição", callback_data="pend:field:descricao"),
+        telebot.types.InlineKeyboardButton("📅 Data", callback_data="pend:field:data"),
+    )
+    kb.add(telebot.types.InlineKeyboardButton("⬅️ Voltar", callback_data="pend:back"))
+    return kb
+
+
+def _keyboard_categories() -> telebot.types.InlineKeyboardMarkup:
+    kb = telebot.types.InlineKeyboardMarkup(row_width=2)
+    for cat in _CATEGORIES:
+        kb.add(telebot.types.InlineKeyboardButton(cat, callback_data=f"pend:cat:{cat}"))
+    kb.add(telebot.types.InlineKeyboardButton("⬅️ Voltar", callback_data="pend:edit"))
+    return kb
+
+
 def register_handlers(bot: telebot.TeleBot) -> None:
 
     def _classify(text: str, today: str) -> dict | None:
@@ -149,16 +203,10 @@ def register_handlers(bot: telebot.TeleBot) -> None:
         except json.JSONDecodeError:
             return None
 
-    def _build_reply(expense: dict, today: str, com_comprovante: bool = False) -> str:
-        return (
-            f"✅ Gasto registrado{'  com comprovante' if com_comprovante else ''}!\n"
-            f"💰 R$ {expense.get('valor', 0):.2f} — {expense.get('descricao', '')}\n"
-            f"📂 {expense.get('categoria', 'Outros')} | 📅 {expense.get('data_gasto', today)}"
-        )
-
     def _start_gastos_flow(message: telebot.types.Message, user_id: int, periodo: str | None) -> None:
         text = f"📊 Gastos de {periodo} — quem você quer ver?" if periodo else "📊 Gastos — o que você quer ver?"
         sent = bot.reply_to(message, text, reply_markup=_keyboard_who("gastos"))
+        _track_msg(message.chat.id, sent.message_id)
         _gastos_state[(message.chat.id, sent.message_id)] = {
             "periodo": periodo,
             "requesting_user_id": user_id,
@@ -167,6 +215,7 @@ def register_handlers(bot: telebot.TeleBot) -> None:
     def _start_comp_flow(message: telebot.types.Message, user_id: int, mes: str | None) -> None:
         text = f"📎 Comprovantes de {mes} — quem você quer ver?" if mes else "📎 Comprovantes — o que você quer ver?"
         sent = bot.reply_to(message, text, reply_markup=_keyboard_who("comp"))
+        _track_msg(message.chat.id, sent.message_id)
         _comp_state[(message.chat.id, sent.message_id)] = {
             "periodo": mes,
             "requesting_user_id": user_id,
@@ -178,12 +227,13 @@ def register_handlers(bot: telebot.TeleBot) -> None:
             bot.reply_to(message, "❌ Acesso não autorizado.")
             return
         nome = message.from_user.first_name or "você"
-        bot.reply_to(
+        sent = bot.reply_to(
             message,
             f"👋 Olá, {nome}\\! Use os botões abaixo ou descreva um gasto para registrar\\.",
             parse_mode="MarkdownV2",
             reply_markup=_reply_keyboard(),
         )
+        _track_msg(message.chat.id, sent.message_id)
 
     @bot.message_handler(commands=["help", "ajuda"])
     def handle_help(message: telebot.types.Message) -> None:
@@ -210,7 +260,8 @@ def register_handlers(bot: telebot.TeleBot) -> None:
             "*Ajuda*\n"
             "/help — exibe esta mensagem"
         )
-        bot.reply_to(message, texto, parse_mode="MarkdownV2", reply_markup=_reply_keyboard())
+        sent = bot.reply_to(message, texto, parse_mode="MarkdownV2", reply_markup=_reply_keyboard())
+        _track_msg(message.chat.id, sent.message_id)
 
     @bot.message_handler(commands=["gastos"])
     def handle_gastos(message: telebot.types.Message) -> None:
@@ -308,7 +359,8 @@ def register_handlers(bot: telebot.TeleBot) -> None:
                     f"💰 R$ {float(r.get('valor', 0)):.2f} — {r.get('descricao', '')}\n"
                     f"📂 {r.get('categoria', '')} | 📅 {r.get('data_gasto', '')}"
                 )
-                bot.send_photo(chat_id, r["telegram_file_id"], caption=caption)
+                sent_photo = bot.send_photo(chat_id, r["telegram_file_id"], caption=caption)
+                _track_msg(chat_id, sent_photo.message_id)
 
         if data.startswith("comp:who:"):
             who = data[len("comp:who:"):]
@@ -359,7 +411,95 @@ def register_handlers(bot: telebot.TeleBot) -> None:
             return
 
         texto = _build_lancamentos_text(titulo, rows, show_pessoa=spp)
-        bot.send_message(call.message.chat.id, texto)
+        sent = bot.send_message(call.message.chat.id, texto)
+        _track_msg(call.message.chat.id, sent.message_id)
+        bot.answer_callback_query(call.id)
+
+    @bot.callback_query_handler(func=lambda c: c.data.startswith("pend:"))
+    def handle_pending_callback(call: telebot.types.CallbackQuery) -> None:
+        user_id = call.from_user.id
+        chat_id = call.message.chat.id
+        msg_id = call.message.message_id
+        state_key = (chat_id, msg_id)
+
+        if not is_authorized(user_id):
+            bot.answer_callback_query(call.id, "❌ Acesso não autorizado.")
+            return
+
+        state = _pending_expense.get(state_key)
+        if not state:
+            bot.answer_callback_query(call.id, "⚠️ Registro expirado. Envie novamente.")
+            bot.edit_message_reply_markup(chat_id, msg_id, reply_markup=None)
+            return
+
+        expense = state["expense"]
+        data = call.data
+
+        if data == "pend:confirm":
+            save_to_db({
+                "timestamp": datetime.now().isoformat(),
+                "user_id": state["requesting_user_id"],
+                "username": state.get("username", ""),
+                "mensagem_original": state.get("mensagem_original", ""),
+                "valor": expense.get("valor", 0),
+                "categoria": expense.get("categoria", "Outros"),
+                "descricao": expense.get("descricao", ""),
+                "data_gasto": expense.get("data_gasto", ""),
+                "telegram_file_id": state.get("telegram_file_id") or "",
+            })
+            _pending_expense.pop(state_key, None)
+            com_comprovante = bool(state.get("telegram_file_id"))
+            bot.edit_message_text(
+                f"✅ Gasto registrado{'  com comprovante' if com_comprovante else ''}!\n"
+                f"💰 R$ {expense.get('valor', 0):.2f} — {expense.get('descricao', '')}\n"
+                f"📂 {expense.get('categoria', 'Outros')} | 📅 {expense.get('data_gasto', '')}",
+                chat_id, msg_id,
+            )
+
+        elif data == "pend:cancel":
+            _pending_expense.pop(state_key, None)
+            bot.edit_message_text("❌ Registro cancelado.", chat_id, msg_id)
+
+        elif data == "pend:edit":
+            bot.edit_message_text(
+                f"✏️ O que você quer editar?\n\n"
+                f"💰 R$ {expense.get('valor', 0):.2f} — {expense.get('descricao', '')}\n"
+                f"📂 {expense.get('categoria', 'Outros')} | 📅 {expense.get('data_gasto', '')}",
+                chat_id, msg_id,
+                reply_markup=_keyboard_edit_fields(),
+            )
+
+        elif data == "pend:back":
+            com_comprovante = bool(state.get("telegram_file_id"))
+            bot.edit_message_text(
+                _preview_text(expense, com_comprovante),
+                chat_id, msg_id,
+                reply_markup=_keyboard_confirm(),
+            )
+
+        elif data.startswith("pend:field:"):
+            field = data[len("pend:field:"):]
+            if field == "categoria":
+                bot.edit_message_text("📂 Selecione a categoria:", chat_id, msg_id, reply_markup=_keyboard_categories())
+            else:
+                prompts = {
+                    "valor": "Qual o novo valor? (ex: 35.90)",
+                    "descricao": "Qual a nova descrição?",
+                    "data": "Qual a nova data? (ex: 2026-05-13)",
+                }
+                _editing_state[(chat_id, user_id)] = {"field": field, "confirm_msg_id": msg_id}
+                bot.edit_message_text(prompts.get(field, f"Digite o novo {field}:"), chat_id, msg_id)
+
+        elif data.startswith("pend:cat:"):
+            cat = data[len("pend:cat:"):]
+            state["expense"]["categoria"] = cat
+            com_comprovante = bool(state.get("telegram_file_id"))
+            bot.edit_message_text(
+                _preview_text(expense, com_comprovante),
+                chat_id, msg_id,
+                reply_markup=_keyboard_confirm(),
+            )
+
         bot.answer_callback_query(call.id)
 
     @bot.message_handler(commands=["comprovante"])
@@ -380,26 +520,31 @@ def register_handlers(bot: telebot.TeleBot) -> None:
             return
         caption = message.caption
         if not caption:
-            bot.reply_to(message, "📎 Mande a foto com uma legenda descrevendo o gasto. Ex: 'Condomínio 850'")
+            sent = bot.reply_to(message, "📎 Mande a foto com uma legenda descrevendo o gasto. Ex: 'Condomínio 850'")
+            _track_msg(message.chat.id, sent.message_id)
             return
         today = datetime.now().strftime("%Y-%m-%d")
-        expense = _classify(caption, today)
-        if expense is None or expense.get("intent") != "registrar" or not expense.get("valido", False):
-            bot.reply_to(message, "❌ Não entendi o gasto na legenda. Tente: 'Condomínio 850 reais'.")
+        classified = _classify(caption, today)
+        if classified is None or classified.get("intent") != "registrar" or not classified.get("valido", False):
+            sent = bot.reply_to(message, "❌ Não entendi o gasto na legenda. Tente: 'Condomínio 850 reais'.")
+            _track_msg(message.chat.id, sent.message_id)
             return
         file_id = message.photo[-1].file_id
-        save_to_db({
-            "timestamp": datetime.now().isoformat(),
-            "user_id": user_id,
+        expense = {
+            "valor": classified.get("valor", 0),
+            "categoria": classified.get("categoria", "Outros"),
+            "descricao": classified.get("descricao", ""),
+            "data_gasto": classified.get("data_gasto", today),
+        }
+        sent = bot.reply_to(message, _preview_text(expense, com_comprovante=True), reply_markup=_keyboard_confirm())
+        _track_msg(message.chat.id, sent.message_id)
+        _pending_expense[(message.chat.id, sent.message_id)] = {
+            "expense": expense,
+            "requesting_user_id": user_id,
             "username": message.from_user.username or "",
             "mensagem_original": caption,
-            "valor": expense.get("valor", 0),
-            "categoria": expense.get("categoria", "Outros"),
-            "descricao": expense.get("descricao", ""),
-            "data_gasto": expense.get("data_gasto", today),
             "telegram_file_id": file_id,
-        })
-        bot.reply_to(message, _build_reply(expense, today, com_comprovante=True))
+        }
 
     @bot.message_handler(func=lambda m: True)
     def handle_message(message: telebot.types.Message) -> None:
@@ -408,38 +553,84 @@ def register_handlers(bot: telebot.TeleBot) -> None:
             bot.reply_to(message, "❌ Acesso não autorizado.")
             return
 
-        if message.text == "💰 Gastos":
+        chat_id = message.chat.id
+        edit_info = _editing_state.pop((chat_id, user_id), None)
+        if edit_info:
+            confirm_msg_id = edit_info["confirm_msg_id"]
+            state_key = (chat_id, confirm_msg_id)
+            state = _pending_expense.get(state_key)
+            if state:
+                field = edit_info["field"]
+                expense = state["expense"]
+                if field == "valor":
+                    try:
+                        expense["valor"] = float(message.text.replace(",", "."))
+                    except ValueError:
+                        sent = bot.reply_to(message, "❌ Valor inválido. Ex: 35.90")
+                        _track_msg(chat_id, sent.message_id)
+                        _editing_state[(chat_id, user_id)] = edit_info
+                        return
+                elif field == "descricao":
+                    expense["descricao"] = message.text.strip()
+                elif field == "data":
+                    expense["data_gasto"] = message.text.strip()
+                try:
+                    com_comprovante = bool(state.get("telegram_file_id"))
+                    bot.edit_message_text(
+                        _preview_text(expense, com_comprovante),
+                        chat_id, confirm_msg_id,
+                        reply_markup=_keyboard_confirm(),
+                    )
+                except Exception:
+                    pass
+            return
+
+        if message.text == "💸":
             _start_gastos_flow(message, user_id, None)
             return
-        if message.text == "📎 Comprovantes":
+        if message.text == "📎":
             _start_comp_flow(message, user_id, None)
             return
-        if message.text == "❓ Ajuda":
+        if message.text == "❓":
             handle_help(message)
+            return
+        if message.text == "🧹":
+            ids = _chat_bot_msgs.pop(chat_id, [])
+            for mid in ids:
+                try:
+                    bot.delete_message(chat_id, mid)
+                except Exception:
+                    pass
             return
 
         today = datetime.now().strftime("%Y-%m-%d")
         resultado = _classify(message.text, today)
         if resultado is None:
-            bot.reply_to(message, "❌ Não consegui entender. Tente novamente ou use /help.")
+            sent = bot.reply_to(message, "❌ Não consegui entender. Tente novamente ou use /help.")
+            _track_msg(chat_id, sent.message_id)
             return
         intent = resultado.get("intent")
 
         if intent == "registrar":
             if not resultado.get("valido", False):
-                bot.reply_to(message, "ℹ️ Manda um gasto pra eu registrar! Ex: 'Almoço 35 reais' ou 'Netflix 45,90'.")
+                sent = bot.reply_to(message, "ℹ️ Manda um gasto pra eu registrar! Ex: 'Almoço 35 reais' ou 'Netflix 45,90'.")
+                _track_msg(chat_id, sent.message_id)
                 return
-            save_to_db({
-                "timestamp": datetime.now().isoformat(),
-                "user_id": user_id,
-                "username": message.from_user.username or "",
-                "mensagem_original": message.text,
+            expense = {
                 "valor": resultado.get("valor", 0),
                 "categoria": resultado.get("categoria", "Outros"),
                 "descricao": resultado.get("descricao", ""),
                 "data_gasto": resultado.get("data_gasto", today),
-            })
-            bot.reply_to(message, _build_reply(resultado, today))
+            }
+            sent = bot.reply_to(message, _preview_text(expense), reply_markup=_keyboard_confirm())
+            _track_msg(chat_id, sent.message_id)
+            _pending_expense[(message.chat.id, sent.message_id)] = {
+                "expense": expense,
+                "requesting_user_id": user_id,
+                "username": message.from_user.username or "",
+                "mensagem_original": message.text,
+                "telegram_file_id": None,
+            }
 
         elif intent == "gastos":
             _start_gastos_flow(message, user_id, resultado.get("periodo"))
@@ -451,4 +642,5 @@ def register_handlers(bot: telebot.TeleBot) -> None:
             handle_help(message)
 
         else:
-            bot.reply_to(message, "ℹ️ Não entendi. Use /help para ver o que posso fazer.")
+            sent = bot.reply_to(message, "ℹ️ Não entendi. Use /help para ver o que posso fazer.")
+            _track_msg(chat_id, sent.message_id)
