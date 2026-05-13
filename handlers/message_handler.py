@@ -1,9 +1,85 @@
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 import telebot
 from handlers.auth import is_authorized
 from ai.llm_client import ask_llm
-from db.sheets import save_to_db, get_comprovantes, get_gastos
+from db.sheets import save_to_db, get_comprovantes, get_gastos, get_gastos_todos
+from config import USER_NAMES, AUTHORIZED_USER_IDS
+
+# (chat_id, bot_message_id) -> {"periodo": str|None, "who": str, "target_uid": int, "requesting_user_id": int}
+_gastos_state: dict[tuple[int, int], dict] = {}
+
+
+def _nome_usuario(uid: int, username: str = "") -> str:
+    return USER_NAMES.get(uid) or (f"@{username}" if username else f"ID {uid}")
+
+
+def _keyboard_who() -> telebot.types.InlineKeyboardMarkup:
+    kb = telebot.types.InlineKeyboardMarkup(row_width=2)
+    kb.add(
+        telebot.types.InlineKeyboardButton("👤 Meus gastos", callback_data="gastos:who:meu"),
+        telebot.types.InlineKeyboardButton("👥 Todos", callback_data="gastos:who:todos"),
+    )
+    kb.add(telebot.types.InlineKeyboardButton("🔍 Por pessoa", callback_data="gastos:who:pessoa"))
+    return kb
+
+
+def _keyboard_period() -> telebot.types.InlineKeyboardMarkup:
+    now = datetime.now()
+    mes_atual = now.strftime("%Y-%m")
+    mes_anterior = (now.replace(day=1) - timedelta(days=1)).strftime("%Y-%m")
+    ano_atual = now.strftime("%Y")
+    kb = telebot.types.InlineKeyboardMarkup()
+    kb.add(telebot.types.InlineKeyboardButton(f"📅 Mês atual ({mes_atual})", callback_data=f"gastos:period:{mes_atual}"))
+    kb.add(telebot.types.InlineKeyboardButton(f"⬅️ Mês passado ({mes_anterior})", callback_data=f"gastos:period:{mes_anterior}"))
+    kb.add(telebot.types.InlineKeyboardButton(f"📆 Este ano ({ano_atual})", callback_data=f"gastos:period:{ano_atual}"))
+    return kb
+
+
+def _keyboard_pessoas() -> telebot.types.InlineKeyboardMarkup:
+    kb = telebot.types.InlineKeyboardMarkup()
+    for uid in AUTHORIZED_USER_IDS:
+        nome = USER_NAMES.get(uid, f"Usuário {uid}")
+        kb.add(telebot.types.InlineKeyboardButton(nome, callback_data=f"gastos:uid:{uid}"))
+    return kb
+
+
+def _build_gastos_text(titulo: str, rows: list[dict], show_por_pessoa: bool = False) -> str:
+    total = sum(float(r.get("valor", 0) or 0) for r in rows)
+    parts = [f"📊 {titulo}\n", f"💰 Total: R$ {total:.2f}", f"🔢 Lançamentos: {len(rows)}"]
+
+    if show_por_pessoa:
+        por_usuario: dict[str, float] = {}
+        for r in rows:
+            try:
+                uid = int(r.get("user_id", 0))
+                nome = USER_NAMES.get(uid) or r.get("username") or str(uid)
+            except (ValueError, TypeError):
+                nome = r.get("username") or str(r.get("user_id", "?"))
+            por_usuario[nome] = por_usuario.get(nome, 0) + float(r.get("valor", 0) or 0)
+        parts.append("\n👥 Por pessoa:")
+        for nome, valor in sorted(por_usuario.items(), key=lambda x: -x[1]):
+            parts.append(f"  {nome}: R$ {valor:.2f}")
+
+    por_categoria: dict[str, float] = {}
+    for r in rows:
+        cat = r.get("categoria", "Outros")
+        por_categoria[cat] = por_categoria.get(cat, 0) + float(r.get("valor", 0) or 0)
+    parts.append("\n📂 Por categoria:")
+    for cat, valor in sorted(por_categoria.items(), key=lambda x: -x[1]):
+        parts.append(f"  {cat}: R$ {valor:.2f}")
+
+    return "\n".join(parts)
+
+
+def _resolve_gastos(who: str, requesting_uid: int, target_uid: int | None, periodo: str) -> tuple[list[dict], str, bool]:
+    if who == "todos":
+        return get_gastos_todos(periodo), f"Todos os gastos — {periodo}", True
+    if who == "uid" and target_uid is not None:
+        nome = _nome_usuario(target_uid)
+        return get_gastos(target_uid, periodo), f"Gastos de {nome} — {periodo}", False
+    nome = _nome_usuario(requesting_uid)
+    return get_gastos(requesting_uid, periodo), f"Gastos de {nome} — {periodo}", False
 
 
 def register_handlers(bot: telebot.TeleBot) -> None:
@@ -22,6 +98,14 @@ def register_handlers(bot: telebot.TeleBot) -> None:
             f"📂 {expense.get('categoria', 'Outros')} | 📅 {expense.get('data_gasto', today)}"
         )
 
+    def _start_gastos_flow(message: telebot.types.Message, user_id: int, periodo: str | None) -> None:
+        text = f"📊 Gastos de {periodo} — quem você quer ver?" if periodo else "📊 Gastos — o que você quer ver?"
+        sent = bot.reply_to(message, text, reply_markup=_keyboard_who())
+        _gastos_state[(message.chat.id, sent.message_id)] = {
+            "periodo": periodo,
+            "requesting_user_id": user_id,
+        }
+
     @bot.message_handler(commands=["help", "ajuda"])
     def handle_help(message: telebot.types.Message) -> None:
         if not is_authorized(message.from_user.id):
@@ -38,9 +122,9 @@ def register_handlers(bot: telebot.TeleBot) -> None:
             "Envie uma foto com legenda descrevendo o gasto:\n"
             "`[foto] Condomínio 850`\n\n"
             "*Resumo de gastos*\n"
-            "/gastos — resumo do mês atual\n"
-            "/gastos 2026\\-05 — resumo de maio/2026\n"
-            "/gastos 2026 — resumo do ano\n\n"
+            "/gastos — resumo interativo com filtros\n"
+            "/gastos 2026\\-05 — gastos de maio/2026\n"
+            "/gastos 2026 — gastos do ano\n\n"
             "*Comprovantes*\n"
             "/comprovante — últimos 5 comprovantes\n"
             "/comprovante 2026\\-05 — comprovantes de maio/2026\n\n"
@@ -52,58 +136,84 @@ def register_handlers(bot: telebot.TeleBot) -> None:
     @bot.message_handler(commands=["gastos"])
     def handle_gastos(message: telebot.types.Message) -> None:
         user_id = message.from_user.id
-
         if not is_authorized(user_id):
             bot.reply_to(message, "❌ Acesso não autorizado.")
             return
-
         args = message.text.split(maxsplit=1)
-        periodo = args[1].strip() if len(args) > 1 else datetime.now().strftime("%Y-%m")
+        periodo = args[1].strip() if len(args) > 1 else None
+        _start_gastos_flow(message, user_id, periodo)
 
-        rows = get_gastos(user_id, periodo)
+    @bot.callback_query_handler(func=lambda c: c.data.startswith("gastos:"))
+    def handle_gastos_callback(call: telebot.types.CallbackQuery) -> None:
+        user_id = call.from_user.id
+        chat_id = call.message.chat.id
+        msg_id = call.message.message_id
+        state_key = (chat_id, msg_id)
 
-        if not rows:
-            bot.reply_to(message, f"ℹ️ Nenhum gasto encontrado para {periodo}.")
+        if not is_authorized(user_id):
+            bot.answer_callback_query(call.id, "❌ Acesso não autorizado.")
             return
 
-        total = sum(float(r.get("valor", 0)) for r in rows)
+        state = _gastos_state.get(state_key, {})
+        requesting_uid = state.get("requesting_user_id", user_id)
+        data = call.data
 
-        por_categoria: dict[str, float] = {}
-        for r in rows:
-            cat = r.get("categoria", "Outros")
-            por_categoria[cat] = por_categoria.get(cat, 0) + float(r.get("valor", 0))
+        if data.startswith("gastos:who:"):
+            who = data[len("gastos:who:"):]
+            if who == "pessoa":
+                _gastos_state[state_key] = {**state, "step": "pessoa"}
+                bot.edit_message_text(
+                    "🔍 Selecione a pessoa:",
+                    chat_id, msg_id,
+                    reply_markup=_keyboard_pessoas(),
+                )
+            else:
+                periodo = state.get("periodo")
+                _gastos_state[state_key] = {**state, "who": who}
+                if periodo:
+                    rows, titulo, spp = _resolve_gastos(who, requesting_uid, None, periodo)
+                    _gastos_state.pop(state_key, None)
+                    texto = _build_gastos_text(titulo, rows, spp) if rows else f"ℹ️ Nenhum gasto encontrado para {periodo}."
+                    bot.edit_message_text(texto, chat_id, msg_id)
+                else:
+                    bot.edit_message_text("📅 Qual período?", chat_id, msg_id, reply_markup=_keyboard_period())
 
-        linhas_cat = "\n".join(
-            f"  {cat}: R$ {valor:.2f}"
-            for cat, valor in sorted(por_categoria.items(), key=lambda x: -x[1])
-        )
+        elif data.startswith("gastos:uid:"):
+            target_uid = int(data[len("gastos:uid:"):])
+            periodo = state.get("periodo")
+            _gastos_state[state_key] = {**state, "who": "uid", "target_uid": target_uid}
+            if periodo:
+                rows, titulo, spp = _resolve_gastos("uid", requesting_uid, target_uid, periodo)
+                _gastos_state.pop(state_key, None)
+                texto = _build_gastos_text(titulo, rows, spp) if rows else f"ℹ️ Nenhum gasto encontrado para {periodo}."
+                bot.edit_message_text(texto, chat_id, msg_id)
+            else:
+                bot.edit_message_text("📅 Qual período?", chat_id, msg_id, reply_markup=_keyboard_period())
 
-        texto = (
-            f"📊 Gastos de {periodo}\n\n"
-            f"💰 Total: R$ {total:.2f}\n"
-            f"🔢 Lançamentos: {len(rows)}\n\n"
-            f"📂 Por categoria:\n{linhas_cat}"
-        )
-        bot.reply_to(message, texto)
+        elif data.startswith("gastos:period:"):
+            periodo = data[len("gastos:period:"):]
+            who = state.get("who", "meu")
+            target_uid = state.get("target_uid")
+            _gastos_state.pop(state_key, None)
+            rows, titulo, spp = _resolve_gastos(who, requesting_uid, target_uid, periodo)
+            texto = _build_gastos_text(titulo, rows, spp) if rows else f"ℹ️ Nenhum gasto encontrado para {periodo}."
+            bot.edit_message_text(texto, chat_id, msg_id)
+
+        bot.answer_callback_query(call.id)
 
     @bot.message_handler(commands=["comprovante"])
     def handle_comprovante(message: telebot.types.Message) -> None:
         user_id = message.from_user.id
-
         if not is_authorized(user_id):
             bot.reply_to(message, "❌ Acesso não autorizado.")
             return
-
         args = message.text.split(maxsplit=1)
         mes = args[1].strip() if len(args) > 1 else None
-
         resultados = get_comprovantes(user_id, mes)
-
         if not resultados:
             dica = f" para {mes}" if mes else ""
             bot.reply_to(message, f"ℹ️ Nenhum comprovante encontrado{dica}.")
             return
-
         for r in resultados[-5:]:
             caption = (
                 f"💰 R$ {float(r.get('valor', 0)):.2f} — {r.get('descricao', '')}\n"
@@ -114,25 +224,19 @@ def register_handlers(bot: telebot.TeleBot) -> None:
     @bot.message_handler(content_types=["photo"])
     def handle_photo(message: telebot.types.Message) -> None:
         user_id = message.from_user.id
-
         if not is_authorized(user_id):
             bot.reply_to(message, "❌ Acesso não autorizado.")
             return
-
         caption = message.caption
         if not caption:
             bot.reply_to(message, "📎 Mande a foto com uma legenda descrevendo o gasto. Ex: 'Condomínio 850'")
             return
-
         today = datetime.now().strftime("%Y-%m-%d")
         expense = _classify(caption, today)
-
         if expense is None or expense.get("intent") != "registrar" or not expense.get("valido", False):
             bot.reply_to(message, "❌ Não entendi o gasto na legenda. Tente: 'Condomínio 850 reais'.")
             return
-
         file_id = message.photo[-1].file_id
-
         save_to_db({
             "timestamp": datetime.now().isoformat(),
             "user_id": user_id,
@@ -144,24 +248,19 @@ def register_handlers(bot: telebot.TeleBot) -> None:
             "data_gasto": expense.get("data_gasto", today),
             "telegram_file_id": file_id,
         })
-
         bot.reply_to(message, _build_reply(expense, today, com_comprovante=True))
 
     @bot.message_handler(func=lambda m: True)
     def handle_message(message: telebot.types.Message) -> None:
         user_id = message.from_user.id
-
         if not is_authorized(user_id):
             bot.reply_to(message, "❌ Acesso não autorizado.")
             return
-
         today = datetime.now().strftime("%Y-%m-%d")
         resultado = _classify(message.text, today)
-
         if resultado is None:
             bot.reply_to(message, "❌ Não consegui entender. Tente novamente ou use /help.")
             return
-
         intent = resultado.get("intent")
 
         if intent == "registrar":
@@ -181,26 +280,7 @@ def register_handlers(bot: telebot.TeleBot) -> None:
             bot.reply_to(message, _build_reply(resultado, today))
 
         elif intent == "gastos":
-            periodo = resultado.get("periodo", today[:7])
-            rows = get_gastos(user_id, periodo)
-            if not rows:
-                bot.reply_to(message, f"ℹ️ Nenhum gasto encontrado para {periodo}.")
-                return
-            total = sum(float(r.get("valor", 0)) for r in rows)
-            por_categoria: dict[str, float] = {}
-            for r in rows:
-                cat = r.get("categoria", "Outros")
-                por_categoria[cat] = por_categoria.get(cat, 0) + float(r.get("valor", 0))
-            linhas_cat = "\n".join(
-                f"  {cat}: R$ {valor:.2f}"
-                for cat, valor in sorted(por_categoria.items(), key=lambda x: -x[1])
-            )
-            bot.reply_to(message, (
-                f"📊 Gastos de {periodo}\n\n"
-                f"💰 Total: R$ {total:.2f}\n"
-                f"🔢 Lançamentos: {len(rows)}\n\n"
-                f"📂 Por categoria:\n{linhas_cat}"
-            ))
+            _start_gastos_flow(message, user_id, resultado.get("periodo"))
 
         elif intent == "comprovantes":
             mes = resultado.get("mes", today[:7])
@@ -220,4 +300,3 @@ def register_handlers(bot: telebot.TeleBot) -> None:
 
         else:
             bot.reply_to(message, "ℹ️ Não entendi. Use /help para ver o que posso fazer.")
-

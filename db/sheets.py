@@ -56,6 +56,14 @@ def get_gastos(user_id: int, periodo: str = None) -> list[dict]:
     ]
 
 
+def get_gastos_todos(periodo: str = None) -> list[dict]:
+    rows = _sheet.get_all_records()
+    return [
+        r for r in rows
+        if periodo is None or str(r.get("data_gasto", "")).startswith(periodo)
+    ]
+
+
 def get_comprovantes(user_id: int, mes: str = None) -> list[dict]:
     rows = _sheet.get_all_records()
     results = [
