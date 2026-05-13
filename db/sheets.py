@@ -60,7 +60,7 @@ def save_to_db(data: dict) -> None:
         data["user_id"],
         data["username"],
         data["mensagem_original"],
-        _safe_float(data.get("valor", 0)),
+        f"{_safe_float(data.get('valor', 0)):.2f}",
         data["categoria"],
         data["descricao"],
         data["data_gasto"],
