@@ -1,8 +1,13 @@
+import os
+
 from openai import OpenAI
-from config import LLM_API_KEY
+
+_api_key = os.getenv("LLM_API_KEY") or os.getenv("OPENAI_API_KEY")
+if not _api_key:
+    raise EnvironmentError("LLM_API_KEY não definida. Configure a variável de ambiente.")
 
 _client = OpenAI(
-    api_key=LLM_API_KEY,
+    api_key=_api_key,
     base_url="https://openrouter.ai/api/v1",
 )
 
