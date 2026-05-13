@@ -312,7 +312,7 @@ def register_handlers(bot: telebot.TeleBot) -> None:
                     _gastos_state.pop(state_key, None)
                     _edit_result(who, requesting_uid, None, periodo)
                 else:
-                    bot.edit_message_text("📅 Qual período?", chat_id, msg_id, reply_markup=_keyboard_period())
+                    bot.edit_message_text("Qual período?", chat_id, msg_id, reply_markup=_keyboard_period())
 
         elif data.startswith("gastos:uid:"):
             target_uid = int(data[len("gastos:uid:"):])
