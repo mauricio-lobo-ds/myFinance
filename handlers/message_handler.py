@@ -98,14 +98,15 @@ def _build_gastos_text(titulo: str, rows: list[dict], show_por_pessoa: bool = Fa
     return "\n".join(parts)
 
 
-def _resolve_gastos(who: str, requesting_uid: int, target_uid: int | None, periodo: str) -> tuple[list[dict], str, bool]:
+def _resolve_gastos(who: str, requesting_uid: int, target_uid: int | None, periodo: str, categoria: str | None = None) -> tuple[list[dict], str, bool]:
+    sufixo_cat = f" · {categoria}" if categoria else ""
     if who == "todos":
-        return get_gastos_todos(periodo), f"Todos os gastos — {periodo}", True
+        return get_gastos_todos(periodo, categoria), f"Todos os gastos — {periodo}{sufixo_cat}", True
     if who == "uid" and target_uid is not None:
         nome = _nome_usuario(target_uid)
-        return get_gastos(target_uid, periodo), f"Gastos de {nome} — {periodo}", False
+        return get_gastos(target_uid, periodo, categoria), f"Gastos de {nome} — {periodo}{sufixo_cat}", False
     nome = _nome_usuario(requesting_uid)
-    return get_gastos(requesting_uid, periodo), f"Gastos de {nome} — {periodo}", False
+    return get_gastos(requesting_uid, periodo, categoria), f"Gastos de {nome} — {periodo}{sufixo_cat}", False
 
 
 def _resolve_comprovantes(who: str, requesting_uid: int, target_uid: int | None, mes: str) -> tuple[list[dict], str]:
@@ -118,9 +119,10 @@ def _resolve_comprovantes(who: str, requesting_uid: int, target_uid: int | None,
     return get_comprovantes(requesting_uid, mes), f"Comprovantes de {nome} — {mes}"
 
 
-def _keyboard_lancamentos(who: str, requesting_uid: int, target_uid: int | None, periodo: str) -> telebot.types.InlineKeyboardMarkup:
+def _keyboard_lancamentos(who: str, requesting_uid: int, target_uid: int | None, periodo: str, categoria: str | None = None) -> telebot.types.InlineKeyboardMarkup:
     tgt = str(target_uid) if target_uid else ""
-    data = f"lanca:{who}:{requesting_uid}:{tgt}:{periodo}"
+    cat_idx = str(_CATEGORIES.index(categoria)) if categoria and categoria in _CATEGORIES else ""
+    data = f"lanca:{who}:{requesting_uid}:{tgt}:{periodo}:{cat_idx}"
     kb = telebot.types.InlineKeyboardMarkup()
     kb.add(telebot.types.InlineKeyboardButton("📋 Ver lançamentos", callback_data=data))
     return kb
@@ -401,11 +403,14 @@ def register_handlers(bot: telebot.TeleBot) -> None:
             bot.answer_callback_query(call.id, "❌ Acesso não autorizado.")
             return
 
-        _, who, req_uid_s, tgt_uid_s, periodo = call.data.split(":", 4)
+        parts = call.data.split(":", 5)
+        _, who, req_uid_s, tgt_uid_s, periodo = parts[:5]
+        cat_idx_s = parts[5] if len(parts) > 5 else ""
         req_uid = int(req_uid_s)
         tgt_uid = int(tgt_uid_s) if tgt_uid_s else None
+        categoria = _CATEGORIES[int(cat_idx_s)] if cat_idx_s else None
 
-        rows, titulo, spp = _resolve_gastos(who, req_uid, tgt_uid, periodo)
+        rows, titulo, spp = _resolve_gastos(who, req_uid, tgt_uid, periodo, categoria)
         if not rows:
             bot.answer_callback_query(call.id, "Nenhum lançamento encontrado.")
             return
@@ -637,7 +642,20 @@ def register_handlers(bot: telebot.TeleBot) -> None:
             }
 
         elif intent == "gastos":
-            _start_gastos_flow(message, user_id, resultado.get("periodo"))
+            periodo = resultado.get("periodo")
+            who = resultado.get("who")
+            categoria = resultado.get("categoria") or None
+            if periodo and who in ("meu", "todos"):
+                rows, titulo, spp = _resolve_gastos(who, user_id, None, periodo, categoria)
+                if not rows:
+                    sem_cat = f" em {categoria}" if categoria else ""
+                    sent = bot.reply_to(message, f"ℹ️ Nenhum gasto encontrado para {periodo}{sem_cat}.", reply_markup=_reply_keyboard())
+                else:
+                    kb = _keyboard_lancamentos(who, user_id, None, periodo, categoria)
+                    sent = bot.reply_to(message, _build_gastos_text(titulo, rows, spp), reply_markup=kb)
+                _track_msg(chat_id, sent.message_id)
+            else:
+                _start_gastos_flow(message, user_id, periodo)
 
         elif intent == "comprovantes":
             _start_comp_flow(message, user_id, resultado.get("mes"))

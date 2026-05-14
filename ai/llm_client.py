@@ -16,9 +16,9 @@ INTENÇÕES:
 {{"intent": "registrar", "valido": true, "valor": <decimal>, "categoria": "<cat>", "descricao": "<resumo>", "data_gasto": "<YYYY-MM-DD>"}}
 
 2. Consultar gastos — quer ver resumo/total de gastos:
-{{"intent": "gastos", "periodo": "<YYYY-MM ou YYYY>"}}
-Exemplos: "quanto gastei esse mês?", "resumo de abril", "gastos de 2026"
-Se não mencionar período, use o mês atual.
+{{"intent": "gastos", "periodo": "<YYYY-MM ou YYYY>", "who": "<meu|todos>", "categoria": "<categoria ou null>"}}
+Exemplos: "quanto gastei esse mês?" -> who: meu, categoria: null. "gastos de todo mundo hoje" -> who: todos. "gastos com alimentação" -> categoria: "Alimentação". "quanto gastei em transporte em abril" -> categoria: "Transporte", periodo: "2026-04".
+Se não mencionar período, use o mês atual. Se não mencionar de quem, use "meu". Se não mencionar categoria, use null.
 
 3. Ver comprovantes — quer ver recibos/comprovantes:
 {{"intent": "comprovantes", "mes": "<YYYY-MM>"}}
