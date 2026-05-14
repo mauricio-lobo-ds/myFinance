@@ -16,9 +16,20 @@ INTENÇÕES:
 {{"intent": "registrar", "valido": true, "valor": <decimal>, "categoria": "<cat>", "descricao": "<resumo>", "data_gasto": "<YYYY-MM-DD>"}}
 
 2. Consultar gastos — quer ver resumo/total de gastos:
-{{"intent": "gastos", "periodo": "<YYYY-MM ou YYYY>", "who": "<meu|todos>", "categoria": "<categoria ou null>"}}
-Exemplos: "quanto gastei esse mês?" -> who: meu, categoria: null. "gastos de todo mundo hoje" -> who: todos. "gastos com alimentação" -> categoria: "Alimentação". "quanto gastei em transporte em abril" -> categoria: "Transporte", periodo: "2026-04".
-Se não mencionar período, use o mês atual. Se não mencionar de quem, use "meu". Se não mencionar categoria, use null.
+{{"intent": "gastos", "periodo": "<YYYY-MM-DD | YYYY-MM | YYYY>", "who": "<meu|todos>", "categoria": "<categoria ou null>"}}
+Regras de periodo:
+- "hoje" ou dia específico → YYYY-MM-DD (ex: hoje={today} → "{today}")
+- "este mês", "esse mês", mês sem dia → YYYY-MM
+- "este ano", "esse ano" → YYYY
+- Sem menção de período → mês atual no formato YYYY-MM
+Regras de who: sempre inclua. "meu", "minha", "eu", "me", ou sem menção de quem → "meu". "todo mundo", "todos", "geral" → "todos".
+Regras de categoria: null se não mencionada. Mapeie para a categoria mais próxima da lista válida.
+Exemplos:
+- "quanto gastei hoje?" → {{"intent":"gastos","periodo":"{today}","who":"meu","categoria":null}}
+- "meus gastos de ontem" → {{"intent":"gastos","periodo":"<data de ontem>","who":"meu","categoria":null}}
+- "gastos com alimentação esse mês" → {{"intent":"gastos","periodo":"<YYYY-MM atual>","who":"meu","categoria":"Alimentação"}}
+- "quanto todo mundo gastou em abril?" → {{"intent":"gastos","periodo":"<YYYY>-04","who":"todos","categoria":null}}
+- "gastos do dia 10/05" → {{"intent":"gastos","periodo":"<YYYY>-05-10","who":"meu","categoria":null}}
 
 3. Ver comprovantes — quer ver recibos/comprovantes:
 {{"intent": "comprovantes", "mes": "<YYYY-MM>"}}

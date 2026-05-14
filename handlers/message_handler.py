@@ -15,7 +15,7 @@ _chat_bot_msgs: dict[int, list[int]] = {}
 
 
 _QUICK_ACTIONS = {"💸", "📎", "❓", "🧹"}
-_CATEGORIES = ["Alimentação", "Transporte", "Moradia", "Saúde", "Lazer", "Educação", "Streaming", "Roupas", "Outros"]
+_CATEGORIES = ["Mercado", "Alimentação", "Transporte", "Moradia", "Saúde", "Lazer", "Educação", "Assinaturas e Streamings", "Compras", "Besteiras", "Outros"]
 
 
 def _track_msg(chat_id: int, message_id: int) -> None:
@@ -642,20 +642,19 @@ def register_handlers(bot: telebot.TeleBot) -> None:
             }
 
         elif intent == "gastos":
-            periodo = resultado.get("periodo")
-            who = resultado.get("who")
+            periodo = resultado.get("periodo") or datetime.now().strftime("%Y-%m")
+            who = resultado.get("who") or "meu"
             categoria = resultado.get("categoria") or None
-            if periodo and who in ("meu", "todos"):
-                rows, titulo, spp = _resolve_gastos(who, user_id, None, periodo, categoria)
-                if not rows:
-                    sem_cat = f" em {categoria}" if categoria else ""
-                    sent = bot.reply_to(message, f"ℹ️ Nenhum gasto encontrado para {periodo}{sem_cat}.", reply_markup=_reply_keyboard())
-                else:
-                    kb = _keyboard_lancamentos(who, user_id, None, periodo, categoria)
-                    sent = bot.reply_to(message, _build_gastos_text(titulo, rows, spp), reply_markup=kb)
-                _track_msg(chat_id, sent.message_id)
+            if who not in ("meu", "todos"):
+                who = "meu"
+            rows, titulo, spp = _resolve_gastos(who, user_id, None, periodo, categoria)
+            if not rows:
+                sem_cat = f" em {categoria}" if categoria else ""
+                sent = bot.reply_to(message, f"ℹ️ Nenhum gasto encontrado para {periodo}{sem_cat}.", reply_markup=_reply_keyboard())
             else:
-                _start_gastos_flow(message, user_id, periodo)
+                kb = _keyboard_lancamentos(who, user_id, None, periodo, categoria)
+                sent = bot.reply_to(message, _build_gastos_text(titulo, rows, spp), reply_markup=kb)
+            _track_msg(chat_id, sent.message_id)
 
         elif intent == "comprovantes":
             _start_comp_flow(message, user_id, resultado.get("mes"))
