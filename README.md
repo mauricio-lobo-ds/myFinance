@@ -66,6 +66,44 @@ python main.py
 
 ---
 
+## Adicionar um novo usuário
+
+### 1. Encontre o bot no Telegram
+
+O bot é identificado pelo username que você definiu no @BotFather. Para compartilhar:
+
+- Link direto: `t.me/nome_do_seu_bot`
+- Ou pesquisar `@nome_do_seu_bot` na busca do Telegram
+
+### 2. Obtenha o ID do novo usuário
+
+A pessoa precisa descobrir o próprio ID:
+
+1. Abrir o Telegram e pesquisar **@userinfobot**
+2. Clicar em **Start**
+3. O bot responde com o **User ID** numérico (ex: `987654321`)
+4. Passar esse número para você
+
+> Enquanto o ID não estiver autorizado, o bot responde com `❌ Acesso não autorizado` para qualquer mensagem.
+
+### 3. Autorize o novo usuário no `.env`
+
+Adicione o ID e o nome nas variáveis correspondentes:
+
+```
+AUTHORIZED_USER_IDS=123456789,987654321
+USER_NAMES=123456789:Mauricio,987654321:Ana
+```
+
+### 4. Reinicie o bot
+
+As variáveis são lidas na inicialização — um restart é necessário para o acesso ser liberado.
+
+- **Local:** pare o processo (`Ctrl+C`) e rode `python main.py` novamente
+- **Railway:** vá em **Deployments** → **Redeploy**
+
+---
+
 ## Como usar o bot
 
 ### Iniciando pela primeira vez

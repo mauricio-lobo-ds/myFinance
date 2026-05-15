@@ -92,19 +92,19 @@ def _build_gastos_text(titulo: str, rows: list[dict], show_por_pessoa: bool = Fa
     por_tipo: dict[str, float] = {}
     for r in rows:
         tipo = r.get("tipo_gasto", "") or ""
-        label = _TIPO_LABELS.get(tipo, "❓ Não classificado")
+        label = _TIPO_LABELS.get(tipo, "Não classificado")
         por_tipo[label] = por_tipo.get(label, 0) + float(r.get("valor", 0) or 0)
-    parts.append("\n🏷️ Por tipo:")
+    parts.append("\nTipos:")
     for label, valor in sorted(por_tipo.items(), key=lambda x: -x[1]):
-        parts.append(f"  {label}: R$ {valor:.2f}")
+        parts.append(f"  🏷️ {label}: R$ {valor:.2f}")
 
     por_categoria: dict[str, float] = {}
     for r in rows:
         cat = r.get("categoria", "Outros")
         por_categoria[cat] = por_categoria.get(cat, 0) + float(r.get("valor", 0) or 0)
-    parts.append("\n📂 Por categoria:")
+    parts.append("\nCategorias:")
     for cat, valor in sorted(por_categoria.items(), key=lambda x: -x[1]):
-        parts.append(f"  {cat}: R$ {valor:.2f}")
+        parts.append(f"  📂 {cat}: R$ {valor:.2f}")
 
     return "\n".join(parts)
 
@@ -174,8 +174,8 @@ def _preview_text(expense: dict, com_comprovante: bool = False) -> str:
         f"📋 Confirma o registro?\n\n"
         f"💰 R$ {expense.get('valor', 0):.2f}\n"
         f"📝 {expense.get('descricao', '')}\n"
-        f"📂 {expense.get('categoria', 'Outros')}\n"
         f"🏷️ {tipo_display}\n"
+        f"📂 {expense.get('categoria', 'Outros')}\n"
         f"📅 {expense.get('data_gasto', '')}"
         f"{comprovante_line}"
     )
@@ -486,8 +486,8 @@ def register_handlers(bot: telebot.TeleBot) -> None:
                 f"✅ Gasto registrado{'  com comprovante' if com_comprovante else ''}!\n\n"
                 f"💰 R$ {expense.get('valor', 0):.2f}\n"
                 f"📝 {expense.get('descricao', '')}\n"
-                f"📂 {expense.get('categoria', 'Outros')}\n"
                 + (f"🏷️ {tipo_display}\n" if tipo_display else "")
+                + f"📂 {expense.get('categoria', 'Outros')}\n"
                 + f"📅 {expense.get('data_gasto', '')}",
                 chat_id, msg_id,
             )
