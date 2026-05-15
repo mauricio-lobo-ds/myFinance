@@ -43,11 +43,9 @@ def _nome_usuario(uid: int, username: str = "") -> str:
 
 
 def _keyboard_who(prefix: str = "gastos") -> telebot.types.InlineKeyboardMarkup:
-    kb = telebot.types.InlineKeyboardMarkup(row_width=2)
-    kb.add(
-        telebot.types.InlineKeyboardButton("👤 Meus", callback_data=f"{prefix}:who:meu"),
-        telebot.types.InlineKeyboardButton("👥 Todos", callback_data=f"{prefix}:who:todos"),
-    )
+    kb = telebot.types.InlineKeyboardMarkup(row_width=1)
+    kb.add(telebot.types.InlineKeyboardButton("👤 Meus", callback_data=f"{prefix}:who:meu"))
+    kb.add(telebot.types.InlineKeyboardButton("👥 Todos", callback_data=f"{prefix}:who:todos"))
     kb.add(telebot.types.InlineKeyboardButton("🔍 Por pessoa", callback_data=f"{prefix}:who:pessoa"))
     return kb
 
@@ -57,9 +55,9 @@ def _keyboard_period(prefix: str = "gastos") -> telebot.types.InlineKeyboardMark
     mes_atual = now.strftime("%Y-%m")
     mes_anterior = (now.replace(day=1) - timedelta(days=1)).strftime("%Y-%m")
     ano_atual = now.strftime("%Y")
-    kb = telebot.types.InlineKeyboardMarkup()
+    kb = telebot.types.InlineKeyboardMarkup(row_width=1)
     kb.add(telebot.types.InlineKeyboardButton(f"📅 Mês atual ({mes_atual})", callback_data=f"{prefix}:period:{mes_atual}"))
-    kb.add(telebot.types.InlineKeyboardButton(f"⬅️ Mês passado ({mes_anterior})", callback_data=f"{prefix}:period:{mes_anterior}"))
+    kb.add(telebot.types.InlineKeyboardButton(f"📅 Mês passado ({mes_anterior})", callback_data=f"{prefix}:period:{mes_anterior}"))
     kb.add(telebot.types.InlineKeyboardButton(f"📆 Este ano ({ano_atual})", callback_data=f"{prefix}:period:{ano_atual}"))
     return kb
 
@@ -109,15 +107,19 @@ def _build_gastos_text(titulo: str, rows: list[dict], show_por_pessoa: bool = Fa
     return "\n".join(parts)
 
 
-def _resolve_gastos(who: str, requesting_uid: int, target_uid: int | None, periodo: str, categoria: str | None = None) -> tuple[list[dict], str, bool]:
-    sufixo_cat = f" · {categoria}" if categoria else ""
+def _resolve_gastos(who: str, requesting_uid: int, target_uid: int | None, periodo: str, categoria: str | None = None, tipo_gasto: str | None = None) -> tuple[list[dict], str, bool]:
+    sufixo = ""
+    if categoria:
+        sufixo += f" · {categoria}"
+    if tipo_gasto:
+        sufixo += f" · {_TIPO_LABELS.get(tipo_gasto, tipo_gasto)}"
     if who == "todos":
-        return get_gastos_todos(periodo, categoria), f"Todos os gastos — {periodo}{sufixo_cat}", True
+        return get_gastos_todos(periodo, categoria, tipo_gasto), f"Todos os gastos — {periodo}{sufixo}", True
     if who == "uid" and target_uid is not None:
         nome = _nome_usuario(target_uid)
-        return get_gastos(target_uid, periodo, categoria), f"Gastos de {nome} — {periodo}{sufixo_cat}", False
+        return get_gastos(target_uid, periodo, categoria, tipo_gasto), f"Gastos de {nome} — {periodo}{sufixo}", False
     nome = _nome_usuario(requesting_uid)
-    return get_gastos(requesting_uid, periodo, categoria), f"Gastos de {nome} — {periodo}{sufixo_cat}", False
+    return get_gastos(requesting_uid, periodo, categoria, tipo_gasto), f"Gastos de {nome} — {periodo}{sufixo}", False
 
 
 def _resolve_comprovantes(who: str, requesting_uid: int, target_uid: int | None, mes: str) -> tuple[list[dict], str]:
@@ -130,10 +132,11 @@ def _resolve_comprovantes(who: str, requesting_uid: int, target_uid: int | None,
     return get_comprovantes(requesting_uid, mes), f"Comprovantes de {nome} — {mes}"
 
 
-def _keyboard_lancamentos(who: str, requesting_uid: int, target_uid: int | None, periodo: str, categoria: str | None = None) -> telebot.types.InlineKeyboardMarkup:
+def _keyboard_lancamentos(who: str, requesting_uid: int, target_uid: int | None, periodo: str, categoria: str | None = None, tipo_gasto: str | None = None) -> telebot.types.InlineKeyboardMarkup:
     tgt = str(target_uid) if target_uid else ""
     cat_idx = str(_CATEGORIES.index(categoria)) if categoria and categoria in _CATEGORIES else ""
-    data = f"lanca:{who}:{requesting_uid}:{tgt}:{periodo}:{cat_idx}"
+    tipo_s = tipo_gasto or ""
+    data = f"lanca:{who}:{requesting_uid}:{tgt}:{periodo}:{cat_idx}:{tipo_s}"
     kb = telebot.types.InlineKeyboardMarkup()
     kb.add(telebot.types.InlineKeyboardButton("📋 Ver lançamentos", callback_data=data))
     return kb
@@ -219,6 +222,22 @@ def _keyboard_categories() -> telebot.types.InlineKeyboardMarkup:
     for cat in _CATEGORIES:
         kb.add(telebot.types.InlineKeyboardButton(cat, callback_data=f"pend:cat:{cat}"))
     kb.add(telebot.types.InlineKeyboardButton("⬅️ Voltar", callback_data="pend:edit"))
+    return kb
+
+
+def _keyboard_categoria_filter(prefix: str = "gastos") -> telebot.types.InlineKeyboardMarkup:
+    kb = telebot.types.InlineKeyboardMarkup(row_width=1)
+    kb.add(telebot.types.InlineKeyboardButton("Todas as categorias", callback_data=f"{prefix}:catfilt:"))
+    for cat in _CATEGORIES:
+        kb.add(telebot.types.InlineKeyboardButton(f"📂 {cat}", callback_data=f"{prefix}:catfilt:{cat}"))
+    return kb
+
+
+def _keyboard_tipo_filter(prefix: str = "gastos") -> telebot.types.InlineKeyboardMarkup:
+    kb = telebot.types.InlineKeyboardMarkup(row_width=1)
+    kb.add(telebot.types.InlineKeyboardButton("Todos os tipos", callback_data=f"{prefix}:tipofilt:"))
+    for label, val in _TIPOS:
+        kb.add(telebot.types.InlineKeyboardButton(f"🏷️ {label}", callback_data=f"{prefix}:tipofilt:{val}"))
     return kb
 
 
@@ -316,48 +335,54 @@ def register_handlers(bot: telebot.TeleBot) -> None:
         requesting_uid = state.get("requesting_user_id", user_id)
         data = call.data
 
-        def _edit_result(who: str, req_uid: int, tgt_uid: int | None, periodo: str) -> None:
-            rows, titulo, spp = _resolve_gastos(who, req_uid, tgt_uid, periodo)
+        def _edit_result(who: str, req_uid: int, tgt_uid: int | None, periodo: str, categoria: str | None, tipo_gasto: str | None) -> None:
+            rows, titulo, spp = _resolve_gastos(who, req_uid, tgt_uid, periodo, categoria, tipo_gasto)
             if not rows:
                 bot.edit_message_text(f"ℹ️ Nenhum gasto encontrado para {periodo}.", chat_id, msg_id)
             else:
-                kb = _keyboard_lancamentos(who, req_uid, tgt_uid, periodo)
+                kb = _keyboard_lancamentos(who, req_uid, tgt_uid, periodo, categoria, tipo_gasto)
                 bot.edit_message_text(_build_gastos_text(titulo, rows, spp), chat_id, msg_id, reply_markup=kb)
 
         if data.startswith("gastos:who:"):
             who = data[len("gastos:who:"):]
             if who == "pessoa":
                 _gastos_state[state_key] = {**state, "step": "pessoa"}
-                bot.edit_message_text(
-                    "🔍 Selecione a pessoa:",
-                    chat_id, msg_id,
-                    reply_markup=_keyboard_pessoas(),
-                )
+                bot.edit_message_text("🔍 Selecione a pessoa:", chat_id, msg_id, reply_markup=_keyboard_pessoas())
             else:
                 periodo = state.get("periodo")
                 _gastos_state[state_key] = {**state, "who": who}
                 if periodo:
-                    _gastos_state.pop(state_key, None)
-                    _edit_result(who, requesting_uid, None, periodo)
+                    bot.edit_message_text("📂 Filtrar por categoria?", chat_id, msg_id, reply_markup=_keyboard_categoria_filter())
                 else:
-                    bot.edit_message_text("Qual período?", chat_id, msg_id, reply_markup=_keyboard_period())
+                    bot.edit_message_text("📅 Qual período?", chat_id, msg_id, reply_markup=_keyboard_period())
 
         elif data.startswith("gastos:uid:"):
             target_uid = int(data[len("gastos:uid:"):])
             periodo = state.get("periodo")
             _gastos_state[state_key] = {**state, "who": "uid", "target_uid": target_uid}
             if periodo:
-                _gastos_state.pop(state_key, None)
-                _edit_result("uid", requesting_uid, target_uid, periodo)
+                bot.edit_message_text("📂 Filtrar por categoria?", chat_id, msg_id, reply_markup=_keyboard_categoria_filter())
             else:
                 bot.edit_message_text("📅 Qual período?", chat_id, msg_id, reply_markup=_keyboard_period())
 
         elif data.startswith("gastos:period:"):
             periodo = data[len("gastos:period:"):]
+            _gastos_state[state_key] = {**state, "periodo": periodo}
+            bot.edit_message_text("📂 Filtrar por categoria?", chat_id, msg_id, reply_markup=_keyboard_categoria_filter())
+
+        elif data.startswith("gastos:catfilt:"):
+            categoria = data[len("gastos:catfilt:"):] or None
+            _gastos_state[state_key] = {**state, "categoria": categoria}
+            bot.edit_message_text("🏷️ Filtrar por tipo?", chat_id, msg_id, reply_markup=_keyboard_tipo_filter())
+
+        elif data.startswith("gastos:tipofilt:"):
+            tipo_gasto = data[len("gastos:tipofilt:"):] or None
             who = state.get("who", "meu")
             target_uid = state.get("target_uid")
+            periodo = state.get("periodo")
+            categoria = state.get("categoria")
             _gastos_state.pop(state_key, None)
-            _edit_result(who, requesting_uid, target_uid, periodo)
+            _edit_result(who, requesting_uid, target_uid, periodo, categoria, tipo_gasto)
 
         bot.answer_callback_query(call.id)
 
@@ -429,14 +454,16 @@ def register_handlers(bot: telebot.TeleBot) -> None:
             bot.answer_callback_query(call.id, "❌ Acesso não autorizado.")
             return
 
-        parts = call.data.split(":", 5)
+        parts = call.data.split(":", 6)
         _, who, req_uid_s, tgt_uid_s, periodo = parts[:5]
         cat_idx_s = parts[5] if len(parts) > 5 else ""
+        tipo_s = parts[6] if len(parts) > 6 else ""
         req_uid = int(req_uid_s)
         tgt_uid = int(tgt_uid_s) if tgt_uid_s else None
         categoria = _CATEGORIES[int(cat_idx_s)] if cat_idx_s else None
+        tipo_gasto = tipo_s or None
 
-        rows, titulo, spp = _resolve_gastos(who, req_uid, tgt_uid, periodo, categoria)
+        rows, titulo, spp = _resolve_gastos(who, req_uid, tgt_uid, periodo, categoria, tipo_gasto)
         if not rows:
             bot.answer_callback_query(call.id, "Nenhum lançamento encontrado.")
             return

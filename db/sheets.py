@@ -69,22 +69,24 @@ def save_to_db(data: dict) -> None:
     ])
 
 
-def get_gastos(user_id: int, periodo: str = None, categoria: str = None) -> list[dict]:
+def get_gastos(user_id: int, periodo: str = None, categoria: str = None, tipo_gasto: str = None) -> list[dict]:
     rows = _normalize(_sheet.get_all_records())
     return [
         r for r in rows
         if str(r.get("user_id")) == str(user_id)
         and (periodo is None or str(r.get("data_gasto", "")).startswith(periodo))
         and (categoria is None or r.get("categoria") == categoria)
+        and (tipo_gasto is None or r.get("tipo_gasto") == tipo_gasto)
     ]
 
 
-def get_gastos_todos(periodo: str = None, categoria: str = None) -> list[dict]:
+def get_gastos_todos(periodo: str = None, categoria: str = None, tipo_gasto: str = None) -> list[dict]:
     rows = _normalize(_sheet.get_all_records())
     return [
         r for r in rows
         if (periodo is None or str(r.get("data_gasto", "")).startswith(periodo))
         and (categoria is None or r.get("categoria") == categoria)
+        and (tipo_gasto is None or r.get("tipo_gasto") == tipo_gasto)
     ]
 
 
