@@ -16,6 +16,8 @@ _chat_bot_msgs: dict[int, list[int]] = {}
 
 _QUICK_ACTIONS = {"💸", "📎", "❓", "🧹"}
 _CATEGORIES = ["Mercado", "Alimentação", "Transporte", "Moradia", "Saúde", "Lazer", "Educação", "Assinaturas e Streamings", "Compras", "Besteiras", "Outros"]
+_TIPOS = [("🔁 Fixo", "fixo"), ("📊 Variável", "variavel"), ("🎯 Pontual", "pontual")]
+_TIPO_LABELS = {"fixo": "🔁 Fixo", "variavel": "📊 Variável", "pontual": "🎯 Pontual"}
 
 
 def _track_msg(chat_id: int, message_id: int) -> None:
@@ -87,6 +89,15 @@ def _build_gastos_text(titulo: str, rows: list[dict], show_por_pessoa: bool = Fa
         for nome, valor in sorted(por_usuario.items(), key=lambda x: -x[1]):
             parts.append(f"  {nome}: R$ {valor:.2f}")
 
+    por_tipo: dict[str, float] = {}
+    for r in rows:
+        tipo = r.get("tipo_gasto", "") or ""
+        label = _TIPO_LABELS.get(tipo, "❓ Não classificado")
+        por_tipo[label] = por_tipo.get(label, 0) + float(r.get("valor", 0) or 0)
+    parts.append("\n🏷️ Por tipo:")
+    for label, valor in sorted(por_tipo.items(), key=lambda x: -x[1]):
+        parts.append(f"  {label}: R$ {valor:.2f}")
+
     por_categoria: dict[str, float] = {}
     for r in rows:
         cat = r.get("categoria", "Outros")
@@ -142,7 +153,8 @@ def _build_lancamentos_text(titulo: str, rows: list[dict], show_pessoa: bool = F
         desc = r.get("descricao") or r.get("mensagem_original", "")
         valor = float(r.get("valor", 0) or 0)
         cat = r.get("categoria", "Outros")
-        linha = f"📅 {data_gasto}  💰 R$ {valor:.2f}\n  {desc} · {cat}"
+        tipo_icon = {"fixo": "🔁", "variavel": "📊", "pontual": "🎯"}.get(r.get("tipo_gasto", ""), "")
+        linha = f"📅 {data_gasto}  💰 R$ {valor:.2f}\n  {desc} · {cat}{f' {tipo_icon}' if tipo_icon else ''}"
         if show_pessoa:
             try:
                 uid = int(r.get("user_id", 0))
@@ -155,11 +167,14 @@ def _build_lancamentos_text(titulo: str, rows: list[dict], show_pessoa: bool = F
 
 
 def _preview_text(expense: dict, com_comprovante: bool = False) -> str:
+    tipo = expense.get("tipo_gasto", "")
+    tipo_display = _TIPO_LABELS.get(tipo, "❓ Não classificado")
     comprovante_line = "\n📷 Com comprovante" if com_comprovante else ""
     return (
         f"📋 Confirma o registro?\n\n"
         f"💰 R$ {expense.get('valor', 0):.2f} — {expense.get('descricao', '')}\n"
-        f"📂 {expense.get('categoria', 'Outros')} | 📅 {expense.get('data_gasto', '')}"
+        f"📂 {expense.get('categoria', 'Outros')} | 📅 {expense.get('data_gasto', '')}\n"
+        f"🏷️ {tipo_display}"
         f"{comprovante_line}"
     )
 
@@ -184,7 +199,16 @@ def _keyboard_edit_fields() -> telebot.types.InlineKeyboardMarkup:
         telebot.types.InlineKeyboardButton("📝 Descrição", callback_data="pend:field:descricao"),
         telebot.types.InlineKeyboardButton("📅 Data", callback_data="pend:field:data"),
     )
+    kb.add(telebot.types.InlineKeyboardButton("🏷️ Tipo", callback_data="pend:field:tipo"))
     kb.add(telebot.types.InlineKeyboardButton("⬅️ Voltar", callback_data="pend:back"))
+    return kb
+
+
+def _keyboard_tipos() -> telebot.types.InlineKeyboardMarkup:
+    kb = telebot.types.InlineKeyboardMarkup(row_width=1)
+    for label, val in _TIPOS:
+        kb.add(telebot.types.InlineKeyboardButton(label, callback_data=f"pend:tipo:{val}"))
+    kb.add(telebot.types.InlineKeyboardButton("⬅️ Voltar", callback_data="pend:edit"))
     return kb
 
 
@@ -451,13 +475,16 @@ def register_handlers(bot: telebot.TeleBot) -> None:
                 "descricao": expense.get("descricao", ""),
                 "data_gasto": expense.get("data_gasto", ""),
                 "telegram_file_id": state.get("telegram_file_id") or "",
+                "tipo_gasto": expense.get("tipo_gasto", ""),
             })
             _pending_expense.pop(state_key, None)
             com_comprovante = bool(state.get("telegram_file_id"))
+            tipo_display = _TIPO_LABELS.get(expense.get("tipo_gasto", ""), "")
             bot.edit_message_text(
                 f"✅ Gasto registrado{'  com comprovante' if com_comprovante else ''}!\n"
                 f"💰 R$ {expense.get('valor', 0):.2f} — {expense.get('descricao', '')}\n"
-                f"📂 {expense.get('categoria', 'Outros')} | 📅 {expense.get('data_gasto', '')}",
+                f"📂 {expense.get('categoria', 'Outros')} | 📅 {expense.get('data_gasto', '')}"
+                + (f"\n🏷️ {tipo_display}" if tipo_display else ""),
                 chat_id, msg_id,
             )
             sent = bot.send_message(chat_id, "💬 Mais alguma coisa?", reply_markup=_reply_keyboard())
@@ -490,6 +517,8 @@ def register_handlers(bot: telebot.TeleBot) -> None:
             field = data[len("pend:field:"):]
             if field == "categoria":
                 bot.edit_message_text("📂 Selecione a categoria:", chat_id, msg_id, reply_markup=_keyboard_categories())
+            elif field == "tipo":
+                bot.edit_message_text("🏷️ Selecione o tipo:", chat_id, msg_id, reply_markup=_keyboard_tipos())
             else:
                 prompts = {
                     "valor": "Qual o novo valor? (ex: 35.90)",
@@ -502,6 +531,16 @@ def register_handlers(bot: telebot.TeleBot) -> None:
         elif data.startswith("pend:cat:"):
             cat = data[len("pend:cat:"):]
             state["expense"]["categoria"] = cat
+            com_comprovante = bool(state.get("telegram_file_id"))
+            bot.edit_message_text(
+                _preview_text(expense, com_comprovante),
+                chat_id, msg_id,
+                reply_markup=_keyboard_confirm(),
+            )
+
+        elif data.startswith("pend:tipo:"):
+            tipo = data[len("pend:tipo:"):]
+            state["expense"]["tipo_gasto"] = tipo
             com_comprovante = bool(state.get("telegram_file_id"))
             bot.edit_message_text(
                 _preview_text(expense, com_comprovante),
@@ -544,6 +583,7 @@ def register_handlers(bot: telebot.TeleBot) -> None:
             "categoria": classified.get("categoria", "Outros"),
             "descricao": classified.get("descricao", ""),
             "data_gasto": classified.get("data_gasto", today),
+            "tipo_gasto": classified.get("tipo_gasto", ""),
         }
         sent = bot.reply_to(message, _preview_text(expense, com_comprovante=True), reply_markup=_keyboard_confirm())
         _track_msg(message.chat.id, sent.message_id)
@@ -630,6 +670,7 @@ def register_handlers(bot: telebot.TeleBot) -> None:
                 "categoria": resultado.get("categoria", "Outros"),
                 "descricao": resultado.get("descricao", ""),
                 "data_gasto": resultado.get("data_gasto", today),
+                "tipo_gasto": resultado.get("tipo_gasto", ""),
             }
             sent = bot.reply_to(message, _preview_text(expense), reply_markup=_keyboard_confirm())
             _track_msg(chat_id, sent.message_id)

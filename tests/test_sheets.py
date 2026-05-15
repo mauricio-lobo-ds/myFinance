@@ -82,11 +82,12 @@ def test_save_to_db_calls_append_row_with_all_columns():
         "descricao": "Taxi",
         "data_gasto": "2026-05-11",
         "telegram_file_id": "xyz",
+        "tipo_gasto": "variavel",
     }
     sheets.save_to_db(data)
     mock_sheet.append_row.assert_called_once_with([
         "2026-05-11T20:00:00", 123, "mauricio", "Taxi 30",
-        30.0, "Transporte", "Taxi", "2026-05-11", "xyz",
+        "30.00", "Transporte", "Taxi", "2026-05-11", "xyz", "variavel",
     ])
     mock_sheet.append_row.reset_mock()
 

@@ -87,7 +87,7 @@ Shown on `/start` and `/help`. Three buttons:
 ## LLM Response Format
 
 ```json
-{"intent": "registrar", "valido": true, "valor": 35.00, "categoria": "Alimentação", "descricao": "Almoço", "data_gasto": "2026-05-08"}
+{"intent": "registrar", "valido": true, "valor": 35.00, "categoria": "Alimentação", "descricao": "Almoço", "data_gasto": "2026-05-08", "tipo_gasto": "variavel"}
 {"intent": "registrar", "valido": false}
 {"intent": "gastos", "periodo": "2026-05"}
 {"intent": "comprovantes", "mes": "2026-05"}
@@ -97,7 +97,7 @@ Shown on `/start` and `/help`. Three buttons:
 
 ## Google Sheets Schema
 
-| A: timestamp | B: user_id | C: username | D: mensagem_original | E: valor | F: categoria | G: descricao | H: data_gasto | I: telegram_file_id |
+| A: timestamp | B: user_id | C: username | D: mensagem_original | E: valor | F: categoria | G: descricao | H: data_gasto | I: telegram_file_id | J: tipo_gasto |
 
 Headers are auto-created at startup by `_ensure_headers()` in `sheets.py`.
 

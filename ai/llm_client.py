@@ -13,7 +13,12 @@ Responda APENAS com um JSON válido, sem texto adicional, sem markdown.
 INTENÇÕES:
 
 1. Registrar gasto — usuário descreve uma despesa:
-{{"intent": "registrar", "valido": true, "valor": <decimal>, "categoria": "<cat>", "descricao": "<resumo>", "data_gasto": "<YYYY-MM-DD>"}}
+{{"intent": "registrar", "valido": true, "valor": <decimal>, "categoria": "<cat>", "descricao": "<resumo>", "data_gasto": "<YYYY-MM-DD>", "tipo_gasto": "<fixo|variavel|pontual>"}}
+
+Regras de tipo_gasto:
+- "fixo": despesa recorrente com valor relativamente estável — contas de consumo (energia, água, gás, internet), aluguel, condomínio, IPTU, plano de saúde, academia, assinaturas (streaming, software, telefone), mercado/supermercado
+- "variavel": despesa cotidiana com valor que varia — refeições fora (almoço, jantar, restaurante, lanche, café), transporte avulso (Uber, ônibus, combustível), lazer, besteiras, roupas, consultas e remédios esporádicos, qualquer gasto do dia a dia
+- "pontual": bem durável ou compra de alto valor — eletrodoméstico (geladeira, máquina de lavar, ar-condicionado), eletrônico (celular, notebook, câmera, TV), ferramenta, móvel, reforma, financiamento, presente de valor. Regra prática: item com vida útil de anos ou valor acima de ~R$500
 
 2. Consultar gastos — quer ver resumo/total de gastos:
 {{"intent": "gastos", "periodo": "<YYYY-MM-DD | YYYY-MM | YYYY>", "who": "<meu|todos>", "categoria": "<categoria ou null>"}}

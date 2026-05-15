@@ -22,7 +22,7 @@ _client = gspread.authorize(_creds)
 _sheet = _client.open(GOOGLE_SHEET_NAME).sheet1
 
 _HEADERS = ["timestamp", "user_id", "username", "mensagem_original",
-            "valor", "categoria", "descricao", "data_gasto", "telegram_file_id"]
+            "valor", "categoria", "descricao", "data_gasto", "telegram_file_id", "tipo_gasto"]
 
 def _ensure_headers() -> None:
     existing = _sheet.row_values(1)
@@ -65,6 +65,7 @@ def save_to_db(data: dict) -> None:
         data["descricao"],
         data["data_gasto"],
         data.get("telegram_file_id", ""),
+        data.get("tipo_gasto", ""),
     ])
 
 
