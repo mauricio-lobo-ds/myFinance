@@ -172,9 +172,11 @@ def _preview_text(expense: dict, com_comprovante: bool = False) -> str:
     comprovante_line = "\n📷 Com comprovante" if com_comprovante else ""
     return (
         f"📋 Confirma o registro?\n\n"
-        f"💰 R$ {expense.get('valor', 0):.2f} — {expense.get('descricao', '')}\n"
-        f"📂 {expense.get('categoria', 'Outros')} | 📅 {expense.get('data_gasto', '')}\n"
-        f"🏷️ {tipo_display}"
+        f"💰 R$ {expense.get('valor', 0):.2f}\n"
+        f"📝 {expense.get('descricao', '')}\n"
+        f"📂 {expense.get('categoria', 'Outros')}\n"
+        f"🏷️ {tipo_display}\n"
+        f"📅 {expense.get('data_gasto', '')}"
         f"{comprovante_line}"
     )
 
@@ -481,10 +483,12 @@ def register_handlers(bot: telebot.TeleBot) -> None:
             com_comprovante = bool(state.get("telegram_file_id"))
             tipo_display = _TIPO_LABELS.get(expense.get("tipo_gasto", ""), "")
             bot.edit_message_text(
-                f"✅ Gasto registrado{'  com comprovante' if com_comprovante else ''}!\n"
-                f"💰 R$ {expense.get('valor', 0):.2f} — {expense.get('descricao', '')}\n"
-                f"📂 {expense.get('categoria', 'Outros')} | 📅 {expense.get('data_gasto', '')}"
-                + (f"\n🏷️ {tipo_display}" if tipo_display else ""),
+                f"✅ Gasto registrado{'  com comprovante' if com_comprovante else ''}!\n\n"
+                f"💰 R$ {expense.get('valor', 0):.2f}\n"
+                f"📝 {expense.get('descricao', '')}\n"
+                f"📂 {expense.get('categoria', 'Outros')}\n"
+                + (f"🏷️ {tipo_display}\n" if tipo_display else "")
+                + f"📅 {expense.get('data_gasto', '')}",
                 chat_id, msg_id,
             )
             sent = bot.send_message(chat_id, "💬 Mais alguma coisa?", reply_markup=_reply_keyboard())
