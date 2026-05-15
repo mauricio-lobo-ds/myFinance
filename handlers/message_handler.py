@@ -16,8 +16,8 @@ _chat_bot_msgs: dict[int, list[int]] = {}
 
 _QUICK_ACTIONS = {"💸", "📎", "❓", "🧹"}
 _CATEGORIES = ["Mercado", "Alimentação", "Transporte", "Moradia", "Saúde", "Lazer", "Educação", "Assinaturas e Streamings", "Compras", "Besteiras", "Outros"]
-_TIPOS = [("🔁 Fixo", "fixo"), ("📊 Variável", "variavel"), ("🎯 Pontual", "pontual")]
-_TIPO_LABELS = {"fixo": "🔁 Fixo", "variavel": "📊 Variável", "pontual": "🎯 Pontual"}
+_TIPOS = [("Fixo", "fixo"), ("Variável", "variavel"), ("Pontual", "pontual")]
+_TIPO_LABELS = {"fixo": "Fixo", "variavel": "Variável", "pontual": "Pontual"}
 
 
 def _track_msg(chat_id: int, message_id: int) -> None:
@@ -153,8 +153,8 @@ def _build_lancamentos_text(titulo: str, rows: list[dict], show_pessoa: bool = F
         desc = r.get("descricao") or r.get("mensagem_original", "")
         valor = float(r.get("valor", 0) or 0)
         cat = r.get("categoria", "Outros")
-        tipo_icon = {"fixo": "🔁", "variavel": "📊", "pontual": "🎯"}.get(r.get("tipo_gasto", ""), "")
-        linha = f"📅 {data_gasto}  💰 R$ {valor:.2f}\n  {desc} · {cat}{f' {tipo_icon}' if tipo_icon else ''}"
+        tipo = _TIPO_LABELS.get(r.get("tipo_gasto", ""), "")
+        linha = f"📅 {data_gasto}  💰 R$ {valor:.2f}\n  {desc} · {cat}{f' · 🏷️ {tipo}' if tipo else ''}"
         if show_pessoa:
             try:
                 uid = int(r.get("user_id", 0))
